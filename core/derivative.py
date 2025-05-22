@@ -1,5 +1,5 @@
 import math
-import pynet.core.activation as Activation
+import core.activation as Activation
 
 # scalers
 

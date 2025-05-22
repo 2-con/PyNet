@@ -1,6 +1,6 @@
 
 import math
-import pynet.tools.math as math2
+import tools.math as math2
 
 class Optimizer:
   def __init__(self):

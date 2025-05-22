@@ -1,5 +1,5 @@
 import math
-import pynet.core.loss as loss
+import core.loss as loss
 import numpy as np
 
 def Accuracy(y_true:list, y_pred:list):

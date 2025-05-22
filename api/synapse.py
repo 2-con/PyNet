@@ -40,18 +40,31 @@ if __name__ == "__main__":
 #                                               Imports                                               #
 #######################################################################################################
 
+import sys
+import os
+
+# Get the directory of the current script (test.py)
+current_script_dir = os.path.dirname(__file__)
+
+# Navigate up one level to the 'PyNet' directory
+# If test.py is in PyNet/tests/, then '..' takes us to PyNet/
+pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+
+# Add the PyNet root directory to Python's module search path
+sys.path.append(pynet_root_dir)
+
 import random
 import numpy as np
 
-from pynet.tools import arraytools, scaler, utility, visual
-from pynet.tools import math as math2
+from tools import arraytools, scaler, utility, visual
+from tools import math as math2
 
-from pynet.core import activation as Activation
-from pynet.core import derivative as Derivative
-from pynet.core import loss as Error
-from pynet.core import metric as Metrics
-from pynet.core import initialization as Initialization
-import pynet.core.optimizer as optimizer
+from core import activation as Activation
+from core import derivative as Derivative
+from core import loss as Error
+from core import metric as Metrics
+from core import initialization as Initialization
+import core.optimizer as optimizer
 
 Optimizer = optimizer.Optimizer # set global object
 

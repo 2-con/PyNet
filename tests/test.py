@@ -1,13 +1,20 @@
 import sys
 import os
-# Get the directory containing 'pynet'
-pynet_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.append(pynet_dir)
-from pynet.api import synapse as ai
 
-import pynet.tools.arraytools as tools
-import pynet.tools.visual as visual
-from pynet.tools.arraytools import generate_random_array
+# Get the directory of the current script (test.py)
+current_script_dir = os.path.dirname(__file__)
+
+# Navigate up one level to the 'PyNet' directory
+# If test.py is in PyNet/tests/, then '..' takes us to PyNet/
+pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+
+# Add the PyNet root directory to Python's module search path
+sys.path.append(pynet_root_dir)
+import api.synapse as ai
+
+import tools.arraytools as tools
+import tools.visual as visual
+from tools.arraytools import generate_random_array
 
 test = 2
 
