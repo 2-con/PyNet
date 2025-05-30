@@ -440,6 +440,463 @@ class Sequential:
     - (optional) regularity    (int) : how often to show training stats
     - (optional) decimals      (int) : how many decimals to show
     """
+    def Propagate(input):
+      """
+      Forward pass / Propagate
+      -----
+      gets the activations of the entire model, excluding the utility layers
+      """
+
+      x = input[:]
+      activations = [x]
+      weighted_sums = []
+
+      if self.RNN:
+        
+        input_index = 0
+        carry = 0
+        carryWS = 0
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            
+            output, carry = layer.apply(x[input_index], carry)
+            
+            activations.append([x[input_index], output])
+            
+            outputWS, carryWS = layer.get_weighted_sum(x[input_index], carryWS)
+            
+            input_index += 1
+            
+          else:
+            output, carry = layer.apply(0, carry)
+            activations.append([0, output])
+            
+          weighted_sums.append(outputWS)
+          
+      else:
+        x = input[:]
+        xWS = 0
+        for layer in self.layers:
+          
+          if type(layer) in (Convolution, Dense, AFS, Operation, Localunit):
+            xWS = layer.get_weighted_sum(x)
+            weighted_sums.append(xWS)
+
+          else:
+            weighted_sums.append(x)
+            
+          x = layer.apply(x)
+          activations.append(x)  
+
+      return activations, weighted_sums
+
+    def Backpropagate(activations, weighted_sums, target):
+      """
+      Backward pass / Backpropagate
+      -----
+      gets the errors of the entire model, excluding the utility layers
+      """
+
+      def index_corrector(index):
+        if index < 0:
+          return None
+        elif index > prev_layer.receptive_field - 1:
+          return None
+        else:
+          return index
+
+      errors = [0] * ( len(self.layers) )
+      initial_gradient = []
+      
+      if self.RNN:
+        predicted = [cell[1] for cell in activations[1:]]
+        
+      else:
+        predicted = activations[-1]
+      
+      if True: # calculate the initial gradient
+
+        if self.loss == 'total squared error':
+          initial_gradient = [(pred - true) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'mean abseloute error':
+          initial_gradient = [math2.sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'total abseloute error':
+          initial_gradient = [math2.sgn(pred - true) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'categorical crossentropy':
+
+          initial_gradient = [-true / pred if pred != 0 else -1000 for true, pred in zip(target, predicted)]
+
+        elif self.loss == 'sparse categorical crossentropy':
+
+          initial_gradient = [-(true == i) / pred if pred != 0 else -1000 for i, pred, true in zip(range(len(predicted)), predicted, target)]
+
+        elif self.loss == 'binary crossentropy':
+
+          initial_gradient = [
+                              -1 / pred if true == 1 else 1 / (1 - pred) if pred < 1 else 1000
+                              for true, pred in zip(target, predicted)
+          ]
+
+        elif self.loss == 'hinge loss':
+          initial_gradient = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
+
+        else: # defaults to MSE if loss is ambiguous
+          initial_gradient = [(2 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
+
+        output_layer_errors = []
+
+        if type(self.layers[-1]) == Operation:
+
+          this_WS = weighted_sums[-1]
+          this_activations = activations[-1]
+          this_layer = self.layers[-1]
+          derivative_list = []
+
+          if self.layers[-1].operation == 'min max scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'standard scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'max abs scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'robust scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'softmax':
+            derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
+
+            sqrt_size = int(len(derivative_list)**0.5)
+            derivative_list = arraytools.reshape(derivative_list, sqrt_size, sqrt_size)
+
+            num_outputs = len(initial_gradient)
+            num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
+
+            for j in range(num_inputs): # Iterate through the columns of the Jacobian (inputs of softmax)
+              result = 0
+              for i in range(num_outputs): # Iterate through the rows of the Jacobian (outputs of softmax) and elements of initial_gradient
+                result += initial_gradient[i] * derivative_list[i][j]
+              output_layer_errors.append(result)
+
+          else: # if its a regular operation
+
+            derivative_list = [Key.ACTIVATION_DERIVATIVE[this_layer.operation](a) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+        elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
+
+          for error, weighted in zip(initial_gradient, weighted_sums[-1]):
+            derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
+            output_layer_errors.append(error * derivative)
+
+        elif type(self.layers[-1]) == Flatten: # if its a flatten layer
+
+          sizex, sizey = self.layers[-1].input_shape
+
+          output_layer_errors = arraytools.reshape(initial_gradient[:], sizex, sizey)
+
+        elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
+          recurrent_output_errors = initial_gradient[:]
+          
+          error_C = initial_gradient[-1]
+          error_D = 0
+          total_error = error_C + error_D
+          
+          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1])
+          
+          error_Wa = derivative * total_error * activations[-1][0]
+          error_Wb = derivative * total_error * activations[-1][1]
+          error_B  = derivative * total_error
+          error_a  = derivative * total_error * self.layers[-1].carry_weight
+          
+          output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
+          
+      errors[-1] = output_layer_errors
+
+      for this_layer_index in reversed(range(len(self.layers)-1)):
+        # FRONT | next layer --> this layer --> previous layer | BACK
+
+        this_layer = self.layers[this_layer_index]
+        this_activations = activations[this_layer_index]
+
+        this_WS = weighted_sums[this_layer_index]
+
+        prev_errors = errors[this_layer_index + 1]
+        prev_layer = self.layers[this_layer_index + 1]
+
+        layer_errors = []
+
+        if type(this_layer) in (Dense, AFS, Localunit):
+
+          for this_neuron_index, _ in enumerate(this_layer.neurons):
+
+            neuron_error = []
+
+            derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
+
+            if type(prev_layer) == Dense:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == AFS:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+            elif type(prev_layer) == Operation:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+            elif type(prev_layer) == Localunit:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+        elif type(this_layer) == Convolution:
+
+          kernel = this_layer.kernel[:]
+
+          layer_errors = arraytools.generate_array(value=0, *this_layer.input_shape)
+
+          for a in range(len(layer_errors) - (len(this_layer.kernel) - 1)):
+            for b in range(len(layer_errors[0]) - (len(this_layer.kernel[0]) - 1)):
+
+              # Apply the flipped kernel to the corresponding region in layer_errors
+              for kernel_row in range(len(kernel)):
+                for kernel_col in range(len(kernel[0])):
+                  
+                  # Calculate the corresponding position in layer_errors
+                  output_row = a + kernel_row
+                  output_col = b + kernel_col
+
+                  # calculate the derivative
+                  #derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
+
+                  # Check if the calculated position is within the bounds of the input
+                  # if 0 <= output_row < len(layer_errors) and 0 <= output_col < len(layer_errors[0]):
+                  #   layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col]
+                  
+                  # Accumulate the weighted error
+                  layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] #* derivative
+
+            #visual.numerical_display(prev_WS, title='next WS')
+            #visual.numerical_display(layer_errors, title='layer errors')
+
+        elif type(this_layer) == Flatten:
+
+          for this_neuron_index in range(len(this_layer.neurons)):
+
+            neuron_error = []
+
+            if type(prev_layer) == Dense:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+            elif type(prev_layer) == AFS:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
+
+            elif type(prev_layer) == Operation:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index])
+
+            elif type(prev_layer) == Localunit:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+            layer_errors.append( sum(neuron_error) )
+
+          sizex, sizey = this_layer.input_shape
+
+          layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
+
+        elif type(this_layer) == Reshape:
+
+          sizex, sizey = this_layer.input_shape
+
+          layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
+
+        elif type(this_layer) == Maxpooling:
+          thisx, thisy = this_layer.input_size
+
+          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+          skibidi = -1
+
+          # iterate over all the layers
+          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+
+            skibidi += 1
+            toilet = -1
+
+            # # iterate over all the elements in the layer
+            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+              toilet += 1
+
+              # # control the vertical
+              # for c in range(this_layer.size):
+
+              #   # control the horizontal
+              #   for d in range(this_layer.size):
+
+              #     if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
+
+              #       # if the current element is the maximum value, send it all the error gradient
+
+              #       if (weighted_sums[this_layer_index-1][a+c][b+d] == this_WS[skibidi][toilet]):
+              #         layer_errors[a+c][b+d] += prev_errors[skibidi][toilet]
+
+              # ==========
+
+              max_value = this_WS[skibidi][toilet]  # Get the maximum value
+              count = 0  # Count of elements with the maximum value
+
+              # Find all elements with the maximum value in the pooling window
+              for c in range(this_layer.size):
+                for d in range(this_layer.size):
+                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
+                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
+                      count += 1
+
+              # Distribute the gradient equally among the maximum elements
+              for c in range(this_layer.size):
+                for d in range(this_layer.size):
+                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
+                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
+                      layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+
+        elif type(this_layer) == Meanpooling:
+
+          thisx, thisy = this_layer.input_size
+
+          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+          # for meanpooling, we need to distribute the error over the kernel size
+          # this is done by dividing the error by the kernel size (averaging it over the kernel size)
+
+          skibidi = -1
+
+          # iterate over all the layers
+          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+
+            skibidi += 1
+            toilet = -1
+
+            # iterate over all the elements in the layer
+            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+              toilet += 1
+
+              # control the vertical
+              for c in range(this_layer.size):
+
+                # control the horizontal
+                for d in range(this_layer.size):
+
+                  if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
+
+                    # distribute the error over the kernel size
+
+                    layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (this_layer.size**2)
+
+        elif type(this_layer) == Operation:
+
+          if this_layer.operation == 'min max scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
+
+          elif this_layer.operation == 'standard scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
+
+          elif this_layer.operation == 'max abs scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
+
+          elif this_layer.operation == 'robust scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+
+          elif this_layer.operation == 'softmax':
+            derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
+
+          for this_neuron_index in range(len(this_layer.neurons)):
+
+            neuron_error = []
+
+            if this_layer.operation in Key.ACTIVATION_DERIVATIVE:
+              derivative = Key.ACTIVATION_DERIVATIVE[this_layer.operation](this_WS[this_neuron_index])
+            else:
+              derivative = derivative_list[this_neuron_index]
+
+            if type(prev_layer) == Dense:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == AFS:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+            elif type(prev_layer) == Operation:
+              layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+            elif type(prev_layer) == Localunit:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == Reshape:
+
+              layer_errors.append( prev_errors[this_neuron_index] )
+
+        elif type(this_layer) == Recurrent:
+          
+          if type(prev_layer) != Recurrent:
+            raise SystemError(f'Recurrent layer must be preceded by a Recurrent layer and not {type(prev_layer)}')
+          
+          error_C = recurrent_output_errors[this_layer_index]
+          error_D = prev_errors[3]
+          total_error = error_C + error_D
+          
+          derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS)
+          
+          error_Wa = derivative * total_error * this_activations[0]
+          error_Wb = derivative * total_error * this_activations[1]
+          error_B  = derivative * total_error
+          error_a  = derivative * total_error * this_layer.carry_weight
+          
+          layer_errors = [error_Wa, error_Wb, error_B, error_a]
+          
+        errors[this_layer_index] = layer_errors[:]
+
+      return errors
     
     def update(activations, weighted_sums, errors, learning_rate):
       """
@@ -634,7 +1091,7 @@ class Sequential:
         
         # elif type(layer) == GRU and layer.learnable:
         #   pass
-       
+    
     self.is_trained = True
 
     # variables
@@ -797,7 +1254,7 @@ class Sequential:
           if base_index + batch_index >= len(features):
             continue
 
-          activations, weighted_sums = self.Propagate(features[base_index + batch_index])
+          activations, weighted_sums = Propagate(features[base_index + batch_index])
           
           if self.RNN:
             skibidi = 0
@@ -814,7 +1271,7 @@ class Sequential:
           else:
             target = targets[base_index + batch_index]
           
-          errors.append(self.Backpropagate(activations, weighted_sums, target))
+          errors.append(Backpropagate(activations, weighted_sums, target))
 
           if self.RNN:
             predicted = [cell[1] for cell in activations[1:]]
@@ -838,464 +1295,6 @@ class Sequential:
 
         pad = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%) ") - len(prefix))
         print(prefix + pad + suffix + rate if verbose == 4 else prefix + pad + suffix)
-
-  def Propagate(self, input):
-    """
-    Forward pass / Propagate
-    -----
-    gets the activations of the entire model, excluding the utility layers
-    """
-
-    x = input[:]
-    activations = [x]
-    weighted_sums = []
-
-    if self.RNN:
-      
-      input_index = 0
-      carry = 0
-      carryWS = 0
-      for layer in self.layers: # get activations
-        
-        if layer.accept_input:
-          
-          output, carry = layer.apply(x[input_index], carry)
-          
-          activations.append([x[input_index], output])
-          
-          outputWS, carryWS = layer.get_weighted_sum(x[input_index], carryWS)
-          
-          input_index += 1
-          
-        else:
-          output, carry = layer.apply(0, carry)
-          activations.append([0, output])
-          
-        weighted_sums.append(outputWS)
-        
-    else:
-      x = input[:]
-      xWS = 0
-      for layer in self.layers:
-        
-        if type(layer) in (Convolution, Dense, AFS, Operation, Localunit):
-          xWS = layer.get_weighted_sum(x)
-          weighted_sums.append(xWS)
-
-        else:
-          weighted_sums.append(x)
-          
-        x = layer.apply(x)
-        activations.append(x)  
-
-    return activations, weighted_sums
-
-  def Backpropagate(self, activations, weighted_sums, target):
-    """
-    Backward pass / Backpropagate
-    -----
-    gets the errors of the entire model, excluding the utility layers
-    """
-
-    def index_corrector(index):
-      if index < 0:
-        return None
-      elif index > prev_layer.receptive_field - 1:
-        return None
-      else:
-        return index
-
-    errors = [0] * ( len(self.layers) )
-    initial_gradient = []
-    
-    if self.RNN:
-      predicted = [cell[1] for cell in activations[1:]]
-      
-    else:
-      predicted = activations[-1]
-    
-    if True: # calculate the initial gradient
-
-      if self.loss == 'total squared error':
-        initial_gradient = [(pred - true) for pred, true in zip(predicted, target)]
-
-      elif self.loss == 'mean abseloute error':
-        initial_gradient = [math2.sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
-
-      elif self.loss == 'total abseloute error':
-        initial_gradient = [math2.sgn(pred - true) for pred, true in zip(predicted, target)]
-
-      elif self.loss == 'categorical crossentropy':
-
-        initial_gradient = [-true / pred if pred != 0 else -1000 for true, pred in zip(target, predicted)]
-
-      elif self.loss == 'sparse categorical crossentropy':
-
-        initial_gradient = [-(true == i) / pred if pred != 0 else -1000 for i, pred, true in zip(range(len(predicted)), predicted, target)]
-
-      elif self.loss == 'binary crossentropy':
-
-        initial_gradient = [
-                            -1 / pred if true == 1 else 1 / (1 - pred) if pred < 1 else 1000
-                            for true, pred in zip(target, predicted)
-        ]
-
-      elif self.loss == 'hinge loss':
-        initial_gradient = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
-
-      else: # defaults to MSE if loss is ambiguous
-        initial_gradient = [(2 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
-
-      output_layer_errors = []
-
-      if type(self.layers[-1]) == Operation:
-
-        this_WS = weighted_sums[-1]
-        this_activations = activations[-1]
-        this_layer = self.layers[-1]
-        derivative_list = []
-
-        if self.layers[-1].operation == 'min max scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
-
-          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-        elif self.layers[-1].operation == 'standard scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
-
-          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-        elif self.layers[-1].operation == 'max abs scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
-
-          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-        elif self.layers[-1].operation == 'robust scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
-
-          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-        elif self.layers[-1].operation == 'softmax':
-          derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
-
-          sqrt_size = int(len(derivative_list)**0.5)
-          derivative_list = arraytools.reshape(derivative_list, sqrt_size, sqrt_size)
-
-          num_outputs = len(initial_gradient)
-          num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
-
-          for j in range(num_inputs): # Iterate through the columns of the Jacobian (inputs of softmax)
-            result = 0
-            for i in range(num_outputs): # Iterate through the rows of the Jacobian (outputs of softmax) and elements of initial_gradient
-              result += initial_gradient[i] * derivative_list[i][j]
-            output_layer_errors.append(result)
-
-        else: # if its a regular operation
-
-          derivative_list = [Key.ACTIVATION_DERIVATIVE[this_layer.operation](a) for a in this_WS]
-
-          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-      elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
-
-        for error, weighted in zip(initial_gradient, weighted_sums[-1]):
-          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
-          output_layer_errors.append(error * derivative)
-
-      elif type(self.layers[-1]) == Flatten: # if its a flatten layer
-
-        sizex, sizey = self.layers[-1].input_shape
-
-        output_layer_errors = arraytools.reshape(initial_gradient[:], sizex, sizey)
-
-      elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
-        recurrent_output_errors = initial_gradient[:]
-        
-        error_C = initial_gradient[-1]
-        error_D = 0
-        total_error = error_C + error_D
-        
-        derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1])
-        
-        error_Wa = derivative * total_error * activations[-1][0]
-        error_Wb = derivative * total_error * activations[-1][1]
-        error_B  = derivative * total_error
-        error_a  = derivative * total_error * self.layers[-1].carry_weight
-        
-        output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
-        
-    errors[-1] = output_layer_errors
-
-    for this_layer_index in reversed(range(len(self.layers)-1)):
-      # FRONT | next layer --> this layer --> previous layer | BACK
-
-      this_layer = self.layers[this_layer_index]
-      this_activations = activations[this_layer_index]
-
-      this_WS = weighted_sums[this_layer_index]
-
-      prev_errors = errors[this_layer_index + 1]
-      prev_layer = self.layers[this_layer_index + 1]
-
-      layer_errors = []
-
-      if type(this_layer) in (Dense, AFS, Localunit):
-
-        for this_neuron_index, _ in enumerate(this_layer.neurons):
-
-          neuron_error = []
-
-          derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
-
-          if type(prev_layer) == Dense:
-
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-              neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-            layer_errors.append( derivative * sum(neuron_error) )
-
-          elif type(prev_layer) == AFS:
-
-            layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
-
-          elif type(prev_layer) == Operation:
-
-            layer_errors.append( derivative * prev_errors[this_neuron_index] )
-
-          elif type(prev_layer) == Localunit:
-
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-            layer_errors.append( derivative * sum(neuron_error) )
-
-      elif type(this_layer) == Convolution:
-
-        kernel = this_layer.kernel[:]
-
-        layer_errors = arraytools.generate_array(value=0, *this_layer.input_shape)
-
-        for a in range(len(layer_errors) - (len(this_layer.kernel) - 1)):
-          for b in range(len(layer_errors[0]) - (len(this_layer.kernel[0]) - 1)):
-
-            # Apply the flipped kernel to the corresponding region in layer_errors
-            for kernel_row in range(len(kernel)):
-              for kernel_col in range(len(kernel[0])):
-                
-                # Calculate the corresponding position in layer_errors
-                output_row = a + kernel_row
-                output_col = b + kernel_col
-
-                # calculate the derivative
-                #derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
-
-                # Check if the calculated position is within the bounds of the input
-                # if 0 <= output_row < len(layer_errors) and 0 <= output_col < len(layer_errors[0]):
-                #   layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col]
-                
-                # Accumulate the weighted error
-                layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] #* derivative
-
-          #visual.numerical_display(prev_WS, title='next WS')
-          #visual.numerical_display(layer_errors, title='layer errors')
-
-      elif type(this_layer) == Flatten:
-
-        for this_neuron_index in range(len(this_layer.neurons)):
-
-          neuron_error = []
-
-          if type(prev_layer) == Dense:
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-          elif type(prev_layer) == AFS:
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
-
-          elif type(prev_layer) == Operation:
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              neuron_error.append(prev_errors[prev_neuron_index])
-
-          elif type(prev_layer) == Localunit:
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-          layer_errors.append( sum(neuron_error) )
-
-        sizex, sizey = this_layer.input_shape
-
-        layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
-
-      elif type(this_layer) == Reshape:
-
-        sizex, sizey = this_layer.input_shape
-
-        layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
-
-      elif type(this_layer) == Maxpooling:
-        thisx, thisy = this_layer.input_size
-
-        layer_errors = arraytools.generate_array(thisx, thisy, value=0)
-
-        skibidi = -1
-
-        # iterate over all the layers
-        for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
-
-          skibidi += 1
-          toilet = -1
-
-          # # iterate over all the elements in the layer
-          for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-            toilet += 1
-
-            # # control the vertical
-            # for c in range(this_layer.size):
-
-            #   # control the horizontal
-            #   for d in range(this_layer.size):
-
-            #     if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
-
-            #       # if the current element is the maximum value, send it all the error gradient
-
-            #       if (weighted_sums[this_layer_index-1][a+c][b+d] == this_WS[skibidi][toilet]):
-            #         layer_errors[a+c][b+d] += prev_errors[skibidi][toilet]
-
-            # ==========
-
-            max_value = this_WS[skibidi][toilet]  # Get the maximum value
-            count = 0  # Count of elements with the maximum value
-
-            # Find all elements with the maximum value in the pooling window
-            for c in range(this_layer.size):
-              for d in range(this_layer.size):
-                if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
-                  if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
-                    count += 1
-
-            # Distribute the gradient equally among the maximum elements
-            for c in range(this_layer.size):
-              for d in range(this_layer.size):
-                if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
-                  if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
-                    layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
-
-      elif type(this_layer) == Meanpooling:
-
-        thisx, thisy = this_layer.input_size
-
-        layer_errors = arraytools.generate_array(thisx, thisy, value=0)
-
-        # for meanpooling, we need to distribute the error over the kernel size
-        # this is done by dividing the error by the kernel size (averaging it over the kernel size)
-
-        skibidi = -1
-
-        # iterate over all the layers
-        for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
-
-          skibidi += 1
-          toilet = -1
-
-          # iterate over all the elements in the layer
-          for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-            toilet += 1
-
-            # control the vertical
-            for c in range(this_layer.size):
-
-              # control the horizontal
-              for d in range(this_layer.size):
-
-                if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
-
-                  # distribute the error over the kernel size
-
-                  layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (this_layer.size**2)
-
-      elif type(this_layer) == Operation:
-
-        if this_layer.operation == 'min max scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
-
-        elif this_layer.operation == 'standard scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
-
-        elif this_layer.operation == 'max abs scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
-
-        elif this_layer.operation == 'robust scaler':
-          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
-
-        elif this_layer.operation == 'softmax':
-          derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
-
-        for this_neuron_index in range(len(this_layer.neurons)):
-
-          neuron_error = []
-
-          if this_layer.operation in Key.ACTIVATION_DERIVATIVE:
-            derivative = Key.ACTIVATION_DERIVATIVE[this_layer.operation](this_WS[this_neuron_index])
-          else:
-            derivative = derivative_list[this_neuron_index]
-
-          if type(prev_layer) == Dense:
-
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-              neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-            layer_errors.append( derivative * sum(neuron_error) )
-
-          elif type(prev_layer) == AFS:
-
-            layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
-
-          elif type(prev_layer) == Operation:
-            layer_errors.append( derivative * prev_errors[this_neuron_index] )
-
-          elif type(prev_layer) == Localunit:
-
-            for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-              if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-            layer_errors.append( derivative * sum(neuron_error) )
-
-          elif type(prev_layer) == Reshape:
-
-            layer_errors.append( prev_errors[this_neuron_index] )
-
-      elif type(this_layer) == Recurrent:
-        
-        if type(prev_layer) != Recurrent:
-          raise SystemError(f'Recurrent layer must be preceded by a Recurrent layer and not {type(prev_layer)}')
-        
-        error_C = recurrent_output_errors[this_layer_index]
-        error_D = prev_errors[3]
-        total_error = error_C + error_D
-        
-        derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS)
-        
-        error_Wa = derivative * total_error * this_activations[0]
-        error_Wb = derivative * total_error * this_activations[1]
-        error_B  = derivative * total_error
-        error_a  = derivative * total_error * this_layer.carry_weight
-        
-        layer_errors = [error_Wa, error_Wb, error_B, error_a]
-        
-      errors[this_layer_index] = layer_errors[:]
-
-    return errors
 
   # post-processing
 
