@@ -699,9 +699,6 @@ class Sequential:
                   # Accumulate the weighted error
                   layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] #* derivative
 
-            #visual.numerical_display(prev_WS, title='next WS')
-            #visual.numerical_display(layer_errors, title='layer errors')
-
         elif type(this_layer) == Flatten:
 
           for this_neuron_index in range(len(this_layer.neurons)):
@@ -1520,56 +1517,61 @@ class Convolution:
     self.input_shape = 0
 
   def apply(self, input):
+    self.input_shape = (len(input[0]), len(input))
     answer = []
     
-    self.input_shape = (len(input[0]), len(input))
-    # iterate over all layers
-    for a in range( len(input) - (len(self.kernel) - 1) ):
-
-      layer_output = []
-
-      # iterate over all the elements in the layer
-      for b in range( len(input[a]) - (len(self.kernel[0]) - 1) ):
+    m_rows = len(input)
+    m_cols = len(input[0])
+    k_rows = len(self.kernel)
+    k_cols = len(self.kernel[0])
+    
+    # Calculate the dimensions of the output matrix
+    output_rows = (m_rows - k_rows) + 1
+    output_cols = (m_cols - k_cols) + 1
+    
+    # Initialize the output matrix with zeros
+    output = [[0] * output_cols for _ in range(output_rows)]
+    
+    # Perform convolution
+    for i in range(output_rows):
+      for j in range(output_cols):
         dot_product = 0
-
-        # iterate over the kernel layers
-        for c in range(len(self.kernel)):
-
-          # iterate over the kernel elements
-          for d in range(len(self.kernel[c])):
-
-            # apply the kernel to the input
-            dot_product += self.kernel[c][d] * input[a+c][b+d]
-
-        layer_output.append(Key.ACTIVATION[self.activation](dot_product) + self.bias)
-
-      answer.append(layer_output[:])
-    return answer
+      
+        for ki in range(k_rows):
+          for kj in range(k_cols):
+            dot_product += input[i + ki][j + kj] * self.kernel[ki][kj]
+    
+        output[i][j] = Key.ACTIVATION[self.activation](dot_product) + self.bias 
+    
+    return output
 
   def get_weighted_sum(self, input):
     answer = []
-    # iterate over all layers
-    for a in range( len(input) - (len(self.kernel) - 1) ):
-
-      layer_output = []
-
-      # iterate over all the elements in the layer
-      for b in range( len(input[a]) - (len(self.kernel[0]) - 1) ):
+    
+    m_rows = len(input)
+    m_cols = len(input[0])
+    k_rows = len(self.kernel)
+    k_cols = len(self.kernel[0])
+    
+    # Calculate the dimensions of the output matrix
+    output_rows = (m_rows - k_rows) + 1
+    output_cols = (m_cols - k_cols) + 1
+    
+    # Initialize the output matrix with zeros
+    output = [[0] * output_cols for _ in range(output_rows)]
+    
+    # Perform convolution
+    for i in range(output_rows):
+      for j in range(output_cols):
         dot_product = 0
-
-        # iterate over the kernel layers
-        for c in range(len(self.kernel)):
-
-          # iterate over the kernel elements
-          for d in range(len(self.kernel[c])):
-
-            # apply the kernel to the input
-            dot_product += self.kernel[c][d] * input[a+c][b+d]
-
-        layer_output.append(dot_product + self.bias)
-
-      answer.append(layer_output[:])
-    return answer
+      
+        for ki in range(k_rows):
+          for kj in range(k_cols):
+            dot_product += input[i + ki][j + kj] * self.kernel[ki][kj]
+    
+        output[i][j] = dot_product + self.bias 
+    
+    return output
 
 class Dense:
   def __init__(self, neurons, activation, **kwargs):

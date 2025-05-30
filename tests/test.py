@@ -16,7 +16,7 @@ import tools.arraytools as tools
 import tools.visual as visual
 from tools.arraytools import generate_random_array
 
-test = 2
+test = 1
 
 if test == 1: # CNN
 
@@ -51,7 +51,7 @@ if test == 1: # CNN
   
   model = ai.Sequential( 
     
-    ai.Convolution( kernel=generate_random_array(2,2), activation='none', bias=True, learnable=True),
+    ai.Convolution( kernel=generate_random_array(2,2), activation='none', bias=True, learnable=True ),
     ai.Flatten(),
   )
 
@@ -59,7 +59,7 @@ if test == 1: # CNN
     optimizer='default', 
     loss='mean squared error', 
     learning_rate=0.1, 
-    epochs=1000,
+    epochs=10000,
     metrics=['accuracy']
   )
   
@@ -67,7 +67,7 @@ if test == 1: # CNN
     trainX, 
     trainY, 
     regularity=1, 
-    verbose=2
+    verbose=4
   )
 
   print(model.push(up))

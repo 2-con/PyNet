@@ -6,6 +6,38 @@ A collection of tools for working with arrays, mainly 1D and 2D arrays
   
 import random
 
+def convolve2d(matrix, kernel):
+    """
+    Convolve a 2D matrix with a 2D kernel.
+    
+    Args:
+      matrix (list of list of int): The input matrix.
+      kernel (list of list of int): The kernel to convolve with.
+    
+    Returns:
+      list of list of int: The convolved matrix.
+    """
+    m_rows = len(matrix)
+    m_cols = len(matrix[0])
+    k_rows = len(kernel)
+    k_cols = len(kernel[0])
+    
+    # Calculate the dimensions of the output matrix
+    output_rows = m_rows - k_rows + 1
+    output_cols = m_cols - k_cols + 1
+    
+    # Initialize the output matrix with zeros
+    output = [[0] * output_cols for _ in range(output_rows)]
+    
+    # Perform convolution
+    for i in range(output_rows):
+      for j in range(output_cols):
+        for ki in range(k_rows):
+          for kj in range(k_cols):
+            output[i][j] += matrix[i + ki][j + kj] * kernel[ki][kj]
+    
+    return output
+
 def reshape(input, width, height):
   """
   Reshape
