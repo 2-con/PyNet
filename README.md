@@ -3,4 +3,4 @@ it will become public soon after no drastic changes to the organization and name
 
 sadly, i will not be accepting any contributions at this moment.
 
-estimated date: august 2025 (uncertian + not guarenteed)
+estimated date: August 2025 (uncertian + not guarenteed)
