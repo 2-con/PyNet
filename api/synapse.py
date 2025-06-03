@@ -404,7 +404,7 @@ class Sequential:
     if self.layers == [] or self.layers is None:
       raise ValueError("No layers in model")
     for layer_index, layer in enumerate(self.layers):
-      if type(layer) not in (Dense, Convolution, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit, Recurrent, LTSM, GRU):
+      if type(layer) not in (Dense, Convolution, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit, Recurrent, LSTM, GRU):
         raise TypeError(f"Unknown layer type '{layer.__class__.__name__ }' at layer {layer_index+1}")
 
     # Kwargs - error prevention
@@ -441,11 +441,6 @@ class Sequential:
     - (optional) decimals      (int) : how many decimals to show
     """
     def Propagate(input):
-      """
-      Forward pass / Propagate
-      -----
-      gets the activations of the entire model, excluding the utility layers
-      """
 
       x = input[:]
       activations = [x]
@@ -462,19 +457,42 @@ class Sequential:
             
             output, carry = layer.apply(x[input_index], carry)
             
-            activations.append([x[input_index], output])
+            activations.append([input[input_index], output])
             
-            outputWS, carryWS = layer.get_weighted_sum(x[input_index], carryWS)
+            outputWS, carryWS = layer.get_weighted_sum(x[input_index], carry)
             
             input_index += 1
             
           else:
             output, carry = layer.apply(0, carry)
             activations.append([0, output])
-            
-          weighted_sums.append(outputWS)
+            outputWS, carryWS = layer.get_weighted_sum(0, carry)
           
-      else:
+          weighted_sums.append(outputWS)
+      
+      elif self.LSTM:
+        
+        long_memory = 0
+        short_memory = 0
+        input_index = 0
+        
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            long_memory, short_memory = layer.apply(input[input_index], long_memory, short_memory)
+            activations.append([input[input_index], long_memory, short_memory])
+            final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(input[input_index], long_memory, short_memory)
+            input_index += 1
+          
+          else:
+            long_memory, short_memory = layer.apply(0, long_memory, short_memory)
+            activations.append([0, long_memory, short_memory])
+            final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(0, long_memory, short_memory)
+          
+          weighted_sums.append(final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term)
+      
+      
+      else: # any other type of network
         x = input[:]
         xWS = 0
         for layer in self.layers:
@@ -492,11 +510,6 @@ class Sequential:
       return activations, weighted_sums
 
     def Backpropagate(activations, weighted_sums, target):
-      """
-      Backward pass / Backpropagate
-      -----
-      gets the errors of the entire model, excluding the utility layers
-      """
 
       def index_corrector(index):
         if index < 0:
@@ -511,6 +524,9 @@ class Sequential:
       
       if self.RNN:
         predicted = [cell[1] for cell in activations[1:]]
+      
+      elif self.LSTM:
+        predicted = [cell[2] for cell in activations[:]]
         
       else:
         predicted = activations[-1]
@@ -624,7 +640,52 @@ class Sequential:
           error_a  = derivative * total_error * self.layers[-1].carry_weight
           
           output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
+        
+        elif type(self.layers[-1]) == LSTM: # if its a LSTM layer
+          L_error = 0
+          S_error   = initial_gradient[-1]
+          out_error = initial_gradient[-1]
+          final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
           
+          in_weights = self.layers[-1].input_weights
+          ST_weights = self.layers[-1].short_term_weights
+          biases = self.layers[-1].biases
+          extra_weights = self.layers[-1].extra_weights
+          
+          total_error = out_error + S_error
+          
+          out_err = []
+          input_err = []
+          short_err = []
+          merged_err = []
+          
+          # calculate OUT
+          
+          raise NotImplementedError("LSTM backpropagation is not implemented yet")
+          
+          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error) # calculate [we]
+          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error) # calculate [a]
+          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error) # calculate [b]
+          
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          
+          # calculate OUT
+          
+          
+          
+          # calculate INPUT GATE
+          
+          
+          
+          # calculate FORGET GATE
+          
+          
+          
+          # calculate CARRY
+          
+          
+        
       errors[-1] = output_layer_errors
 
       for this_layer_index in reversed(range(len(self.layers)-1)):
@@ -874,13 +935,16 @@ class Sequential:
               layer_errors.append( prev_errors[this_neuron_index] )
 
         elif type(this_layer) == Recurrent:
-          
           if type(prev_layer) != Recurrent:
             raise SystemError(f'Recurrent layer must be preceded by a Recurrent layer and not {type(prev_layer)}')
           
           error_C = recurrent_output_errors[this_layer_index]
           error_D = prev_errors[3]
-          total_error = error_C + error_D
+          
+          if this_layer.return_output:
+            total_error = error_C + error_D
+          else:
+            total_error = error_D
           
           derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS)
           
@@ -890,17 +954,22 @@ class Sequential:
           error_a  = derivative * total_error * this_layer.carry_weight
           
           layer_errors = [error_Wa, error_Wb, error_B, error_a]
+        
+        elif type(this_layer) == LSTM:
+          if type(prev_layer) != LSTM:
+            raise SystemError(f'LSTM layer must be preceded by a LSTM layer and not {type(prev_layer)}')
           
+          ...
+          
+        elif type(this_layer) == GRU:
+          if type(prev_layer) != GRU:
+            raise SystemError(f'GRU layer must be preceded by a GRU layer and not {type(prev_layer)}')
+        
         errors[this_layer_index] = layer_errors[:]
 
       return errors
     
     def update(activations, weighted_sums, errors, learning_rate):
-      """
-      Update
-      -----
-      updates the weights of the entire model, excluding the utility layers
-      """
 
       alpha = self.alpha
       beta = self.beta
@@ -1083,11 +1152,15 @@ class Sequential:
           param_id += 1
           layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
         
-        # elif type(layer) == LTSM and layer.learnable:
+        # elif type(layer) == LSTM and layer.learnable:
         #   pass
         
         # elif type(layer) == GRU and layer.learnable:
         #   pass
+    
+    #################################################################################################
+    #                                     Automatic Fitting                                         #
+    #################################################################################################
     
     self.is_trained = True
 
@@ -1163,6 +1236,9 @@ class Sequential:
             
             if layer_index == len(self.layers) - 1: # last
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+            
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
 
             else: # every other layer
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
@@ -1183,6 +1259,9 @@ class Sequential:
             
             if layer_index == len(self.layers) - 1: # last
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+              
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
 
             else: # every other layer
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
@@ -1205,6 +1284,9 @@ class Sequential:
             if layer_index == len(self.layers) - 1: # last
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
 
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+            
             else: # every other layer
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
 
@@ -1226,6 +1308,9 @@ class Sequential:
             if layer_index == len(self.layers) - 1: # last
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
 
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+            
             else: # every other layer
               layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
 
@@ -1237,7 +1322,7 @@ class Sequential:
       self.sizes = sizes
     
     self.RNN  = any(type(layer) == Recurrent for layer in self.layers)
-    self.LTSM = any(type(layer) == LTSM for layer in self.layers)
+    self.LSTM = any(type(layer) == LSTM for layer in self.layers)
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
     
     # main training loop - iterate over the epochs
@@ -1253,9 +1338,11 @@ class Sequential:
 
           activations, weighted_sums = Propagate(features[base_index + batch_index])
           
-          if self.RNN:
+          if self.RNN or self.LSTM or self.GRU:
+            
             skibidi = 0
             target = []
+            
             for layer in self.layers:
               if layer.return_output == False:
                 target.append(0)
@@ -1270,14 +1357,14 @@ class Sequential:
           
           errors.append(Backpropagate(activations, weighted_sums, target))
 
-          if self.RNN:
-            predicted = [cell[1] for cell in activations[1:]]
+          if self.RNN or self.LSTM or self.GRU:
+            predicted = self.push(features[base_index + batch_index]) 
 
           else:
             predicted = activations[-1]
             target = targets[base_index + batch_index]
           
-          epoch_loss += Key.ERROR[self.loss](target, predicted)
+          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], predicted)
 
         update(activations, weighted_sums, errors, learning_rate)
         errors = []
@@ -1671,6 +1758,7 @@ class Dense:
 
     # iterate over all the neurons
     for _neuron in self.neurons:
+      
       dot_product = sum([input[i] * _neuron['weights'][i] for i in range(len(input))])
 
       answer.append(dot_product + _neuron['bias'])
@@ -1913,8 +2001,73 @@ class Recurrent:
     
     return [(input * self.input_weight) + (carry * self.carry_weight) + self.bias] * 2
 
-class LTSM: # unimplimented
-  ...
+class LSTM:
+  def __init__(self, **kwargs):
+    """
+    Long Short Term Memory (LSTM)
+    -----
+      Primary block within RNNs (Recurrent Neural Networks). it is only compatible with other LSTMs.
+      it is not copatible with Gated Recurrent Unit (GRU) or Recurrent Unit (RNN).
+    -----
+    Args
+    -----
+    - activation           (string)  : the activation function to use for the attention layer
+    - (Optional) input     (boolean) : accept an input during propagation, on by default
+    - (Optional) output    (boolean) : return anything during propagation, on by default
+    - (Optional) learnable (boolean) : whether or not to learn, on by default
+    - (Optional) name      (string)  : the name of the layer
+    """
+    
+    self.name = kwargs.get('name', 'recurrent')
+    self.accept_input = kwargs.get('input', True)
+    self.return_output = kwargs.get('output', True)
+    self.learnable = kwargs.get('learnable', True)
+    
+    self.short_term_weights = [random.uniform(-1, 1)]* 4
+    self.input_weights      = [random.uniform(-1, 1)]* 4
+    self.biases             = [random.uniform(-0.5, 0.5)]* 4
+    self.extra_weights      = [random.uniform(-1, 1)]* 3
+  
+  def apply(self, input, long_term, short_term):
+    
+    # calculate the merged state
+    
+    weighted_input = [input * self.input_weights[i] for i in range(4)]
+    weighted_short_term = [short_term * self.short_term_weights[i] for i in range(4)]
+    
+    merged_state = [weighted_input[i] + weighted_short_term[i] + self.biases[i] for i in range(len(weighted_input))]
+
+    # process the forget gate
+    gated_long_term = Key.ACTIVATION["sigmoid"](merged_state[0]) * long_term
+    
+    # process the input gate
+    final_long_term = (Key.ACTIVATION["sigmoid"](merged_state[1]) * Key.ACTIVATION["tanh"](merged_state[2])) + gated_long_term
+    
+    # process the output gate
+    final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
+
+    # return the final long term and short term states
+    return [final_long_term, final_short_term]
+  
+  def get_weighted_sum(self, input, long_term, short_term):
+    # calculate the merged state
+    
+    weighted_input = [input * self.input_weights[i] for i in range(4)]
+    weighted_short_term = [short_term * self.short_term_weights[i] for i in range(4)]
+    
+    merged_state = [weighted_input[i] + weighted_short_term[i] + self.biases[i] for i in range(len(weighted_input))]
+
+    # process the forget gate
+    gated_long_term = Key.ACTIVATION["sigmoid"](merged_state[0]) * long_term
+    
+    # process the input gate
+    final_long_term = (Key.ACTIVATION["sigmoid"](merged_state[1]) * Key.ACTIVATION["tanh"](merged_state[2])) + gated_long_term
+    
+    # process the output gate
+    final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
+    
+    # return the final long term and short term states
+    return [final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term]
   
 class GRU: # unimplimented
   ...
