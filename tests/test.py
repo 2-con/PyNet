@@ -16,7 +16,7 @@ import tools.arraytools as tools
 import tools.visual as visual
 from tools.arraytools import generate_random_array
 
-test = 3
+test = 4
 
 if test == 1: # CNN
 
@@ -43,10 +43,10 @@ if test == 1: # CNN
   
   trainX = [up, down, left, right]
   trainY = [
-    [1,0,0,0], 
-    [0,1,0,0], 
-    [0,0,1,0], 
-    [0,0,0,1]
+    [1,1,0,0], 
+    [0,0,1,1], 
+    [1,0,1,0], 
+    [0,1,0,1]
     ]
   
   model = ai.Sequential( 
@@ -88,11 +88,11 @@ elif test == 2: # NN
     loss='mean squared error', 
     learning_rate=0.1, 
     batch_size=1,
-    epochs=20000, 
+    epochs=1000, 
     metrics=['accuracy']
   ) 
 
-  model.fit(training_features, training_target, regularity=1000, verbose=3)
+  model.fit(training_features, training_target, regularity=100, verbose=4)
   
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
@@ -135,36 +135,38 @@ elif test == 3: # RNN
 
 elif test == 4: # LSTM
   training_features = [
-    [2,3,4,5], 
-    [0,1,2,3], 
-    [4,5,6,7], 
-    [-2,-1,0,1]
+    [1, 2, 3, 4],
+    [0, 1, 2, 3],
+    [-1, 0, 1, 2],
     ]
   training_target   = [
-    [6],
+    [5],
     [4],
-    [8],
-    [2]]
+    [3]
+    ]
 
   model = ai.Sequential(
-    ai.LSTM(),
-    ai.LSTM(),
-    ai.LSTM(),
-    ai.LSTM(),
+    ai.LSTM(output = False),
+    ai.LSTM(output = False),
+    ai.LSTM(output = False),
+    ai.LSTM(output = True)
   )
   
   model.compile(
-    optimizer='default', 
+    optimizer='adam', 
     loss='mean squared error', 
-    learning_rate=0.02,
+    learning_rate=0.001,
     batch_size=1, 
-    epochs=10000,
+    epochs=20000,
     metrics=['accuracy']
   ) 
   
-  model.fit(training_features, training_target, regularity=1, verbose=4)
+  model.fit(
+    training_features, 
+    training_target, 
+    regularity=100, 
+    verbose=4
+    )
   
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
-    
-  print(f"{model.push([8,9,10,11])} true [12]")

@@ -346,7 +346,7 @@ class Sequential:
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
-    - SGNDescent  (Sign Gradient Descent)
+    - SGND (Sign Gradient Descent)
     - Default     (PyNet descent)
     - Variational Momentum
     - Momentum
@@ -481,16 +481,15 @@ class Sequential:
           if layer.accept_input:
             long_memory, short_memory = layer.apply(input[input_index], long_memory, short_memory)
             activations.append([input[input_index], long_memory, short_memory])
-            final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(input[input_index], long_memory, short_memory)
+            LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(input[input_index], long_memory, short_memory)
             input_index += 1
           
           else:
             long_memory, short_memory = layer.apply(0, long_memory, short_memory)
             activations.append([0, long_memory, short_memory])
-            final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(0, long_memory, short_memory)
+            LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(0, long_memory, short_memory)
           
-          weighted_sums.append(final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term)
-      
+          weighted_sums.append([LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term])
       
       else: # any other type of network
         x = input[:]
@@ -526,7 +525,7 @@ class Sequential:
         predicted = [cell[1] for cell in activations[1:]]
       
       elif self.LSTM:
-        predicted = [cell[2] for cell in activations[:]]
+        predicted = [cell[2] for cell in activations[1:]]
         
       else:
         predicted = activations[-1]
@@ -642,49 +641,73 @@ class Sequential:
           output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
         
         elif type(self.layers[-1]) == LSTM: # if its a LSTM layer
-          L_error = 0
-          S_error   = initial_gradient[-1]
-          out_error = initial_gradient[-1]
-          final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
+          this_layer = self.layers[-1]
           
-          in_weights = self.layers[-1].input_weights
+          L_error   = 0
+          S_error   = 0
+          out_error = initial_gradient[-1]
+          
+          incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
+          incoming_input = predicted[-1]
+          
           ST_weights = self.layers[-1].short_term_weights
-          biases = self.layers[-1].biases
           extra_weights = self.layers[-1].extra_weights
           
           total_error = out_error + S_error
           
-          out_err = []
-          input_err = []
-          short_err = []
-          merged_err = []
-          
           # calculate OUT
           
-          raise NotImplementedError("LSTM backpropagation is not implemented yet")
-          
-          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error) # calculate [we]
-          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error) # calculate [a]
-          out_err.append(Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error) # calculate [b]
+          out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error # calculate [b]
           
           A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
-          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
           
           # calculate OUT
           
-          
+          merged_D = 1 * A
+          short_D = incoming_ST * A
+          input_D = incoming_input * A
           
           # calculate INPUT GATE
           
+          B_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
+          C_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
           
+          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
+          
+          input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          
+          input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
           
           # calculate FORGET GATE
           
-          
+          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
           
           # calculate CARRY
           
+          carry_ST = (ST_weights[0] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B * incoming_LT) + \
+                     (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                     (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                     (ST_weights[3] * A)
           
+          carry_LT = B * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+          
+          output_layer_errors = [carry_LT, carry_ST, 
+                                 [merged_A, merged_B, merged_C, merged_D], 
+                                 [short_A, short_B, short_C, short_D], 
+                                 [input_A, input_B, input_C, input_D], 
+                                 [out_a, out_b, out_we]
+                                ]
+          
+          # print(output_layer_errors)
+          # exit()
         
       errors[-1] = output_layer_errors
 
@@ -959,7 +982,71 @@ class Sequential:
           if type(prev_layer) != LSTM:
             raise SystemError(f'LSTM layer must be preceded by a LSTM layer and not {type(prev_layer)}')
           
-          ...
+          L_error   = prev_errors[0]
+          S_error   = prev_errors[1]
+          out_error = prev_errors[1] if this_layer.return_output else 0
+          
+          incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[this_layer_index]
+          incoming_input = predicted[this_layer_index]
+          
+          ST_weights = self.layers[this_layer_index].short_term_weights
+          extra_weights = self.layers[this_layer_index].extra_weights
+          
+          total_error = out_error + S_error
+          
+          # calculate OUT
+          
+          out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error # calculate [b]
+          
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+          
+          # calculate OUT
+          
+          merged_D = 1 * A
+          short_D = incoming_ST * A
+          input_D = incoming_input * A
+          
+          # calculate INPUT GATE
+          
+          B_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
+          C_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          
+          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
+          
+          input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          
+          input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          
+          # calculate FORGET GATE
+          
+          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          
+          # calculate CARRY
+          
+          carry_ST = (ST_weights[0] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B * incoming_LT) + \
+                     (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                     (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                     (ST_weights[3] * A)
+          
+          carry_LT = B * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+          
+          layer_errors = [carry_LT, carry_ST, 
+                          [merged_A, merged_B, merged_C, merged_D], 
+                          [short_A, short_B, short_C, short_D], 
+                          [input_A, input_B, input_C, input_D], 
+                          [out_a, out_b, out_we]
+                         ]
+          
+          # print(output_layer_errors)
+          # exit()
           
         elif type(this_layer) == GRU:
           if type(prev_layer) != GRU:
@@ -969,7 +1056,7 @@ class Sequential:
 
       return errors
     
-    def update(activations, weighted_sums, errors, learning_rate):
+    def update(activations, weighted_sum, errors, learning_rate):
 
       alpha = self.alpha
       beta = self.beta
@@ -979,14 +1066,14 @@ class Sequential:
 
       optimize = Key.OPTIMIZER.get(self.optimizer)
 
-      param_id = 0
+      param_id = 0 # must be a positive integer
 
       for this_layer_index in reversed(range(len(self.layers))):
 
         layer = self.layers[this_layer_index]
         prev_activations = activations[this_layer_index]
-        this_WS = weighted_sums[this_layer_index]
-        #this_layer_error = errors[this_layer_index]
+        this_WS = weighted_sum[this_layer_index]
+        # this_layer_error = errors[this_layer_index]
 
         if type(layer) == Dense and layer.learnable:
 
@@ -1152,12 +1239,41 @@ class Sequential:
           param_id += 1
           layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
         
-        # elif type(layer) == LSTM and layer.learnable:
-        #   pass
+        elif type(layer) == LSTM and layer.learnable:
+          
+          B_ERR     = [0] * 4 # biases (merge)
+          ST_ERR    = [0] * 4 # short term weights
+          INPUT_ERR = [0] * 4 # input weights
+          EXTRA_ERR = [0] * 3 # extra weights (output gate)
+          
+          for error_version in errors:
+            B_ERR     = [B_ERR[i]     + error_version[this_layer_index][2][i] for i in range(4)]
+            ST_ERR    = [ST_ERR[i]    + error_version[this_layer_index][3][i] for i in range(4)]
+            INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][4][i] for i in range(4)]
+            EXTRA_ERR = [EXTRA_ERR[i] + error_version[this_layer_index][5][i] for i in range(3)]
+            
+          if self.optimizer not in ('none', ''):
+            B_ERR     = [a / len(errors) for a in B_ERR]
+            ST_ERR    = [b / len(errors) for b in ST_ERR]
+            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+            EXTRA_ERR = [d / len(errors) for d in EXTRA_ERR]
+          
+          for index, bias in enumerate(layer.biases):
+            param_id += 1
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          
+          for index, weight in enumerate(layer.short_term_weights):
+            param_id += 1
+            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          
+          for index, weight in enumerate(layer.input_weights):
+            param_id += 1
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          
+          for index, weight in enumerate(layer.extra_weights):
+            param_id += 1
+            layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
         
-        # elif type(layer) == GRU and layer.learnable:
-        #   pass
-    
     #################################################################################################
     #                                     Automatic Fitting                                         #
     #################################################################################################
@@ -1358,7 +1474,7 @@ class Sequential:
           errors.append(Backpropagate(activations, weighted_sums, target))
 
           if self.RNN or self.LSTM or self.GRU:
-            predicted = self.push(features[base_index + batch_index]) 
+            predicted = self.push(features[base_index + batch_index])
 
           else:
             predicted = activations[-1]
@@ -1448,6 +1564,27 @@ class Sequential:
       
       return answer
       
+    elif self.LSTM:
+      
+      long_term = 0
+      short_term = 0
+      input_index = 0
+      answer = []
+      
+      for layer in self.layers:
+
+        if layer.accept_input:
+          long_term, short_term = layer.apply(x[input_index], long_term, short_term)
+          input_index += 1
+          
+        else:
+          long_term, short_term = layer.apply(0, long_term, short_term)
+
+        if layer.return_output:
+          answer.append(short_term)
+      
+      return answer
+      
     else:
     
       for layer in self.layers:
@@ -1480,7 +1617,7 @@ class Sequential:
           x = layer.apply(x)
 
         else:
-          raise TypeError("Unknown layer type")
+          raise TypeError(f"Unknown layer type {type(layer)}")
 
       return x
 
@@ -1709,7 +1846,7 @@ class Dense:
     self.output_shape = neurons
     self.activation = activation.lower()
     self.input_shape = kwargs.get('input_shape', 0)
-    self.initialization = kwargs.get('initialization', 'glorot uniform')
+    self.initialization = kwargs.get('initialization', 'he normal')
 
     neuron = {
       'weights': [0],
@@ -2023,10 +2160,15 @@ class LSTM:
     self.return_output = kwargs.get('output', True)
     self.learnable = kwargs.get('learnable', True)
     
-    self.short_term_weights = [random.uniform(-1, 1)]* 4
-    self.input_weights      = [random.uniform(-1, 1)]* 4
-    self.biases             = [random.uniform(-0.5, 0.5)]* 4
-    self.extra_weights      = [random.uniform(-1, 1)]* 3
+    STW_RANGE  = 1.22
+    INP_RANGE  = 1.73
+    BIAS_RANGE = 0
+    EXW_RANGE  = 1.22
+    
+    self.short_term_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 4
+    self.input_weights      = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 4
+    self.biases             = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 4
+    self.extra_weights      = [random.uniform(-EXW_RANGE,  EXW_RANGE) ] * 3
   
   def apply(self, input, long_term, short_term):
     
@@ -2047,7 +2189,7 @@ class LSTM:
     final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
 
     # return the final long term and short term states
-    return [final_long_term, final_short_term]
+    return final_long_term, final_short_term
   
   def get_weighted_sum(self, input, long_term, short_term):
     # calculate the merged state
@@ -2067,7 +2209,7 @@ class LSTM:
     final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
     
     # return the final long term and short term states
-    return [final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term]
+    return long_term, short_term, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term
   
 class GRU: # unimplimented
   ...
