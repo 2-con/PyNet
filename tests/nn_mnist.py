@@ -1,14 +1,15 @@
 import sys
 import os
 # Get the directory containing 'pynet'
-pynet_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.append(pynet_dir)
+current_script_dir = os.path.dirname(__file__)
+pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+sys.path.append(pynet_root_dir)
 
-from pynet.api import synapse as tf
+import api.synapse as tf
 
-from pynet.tools.visual import image_display
-from pynet.tools.scaler import argmax
-from pynet.datasets.image import mnist
+from tools.visual import image_display
+from tools.scaler import argmax
+from datasets.image import mnist
 import matplotlib.pyplot as plt
 
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
@@ -16,10 +17,10 @@ train_images, train_labels, test_images, test_labels = mnist(one_hot=True, norma
 # model architecture
 model = tf.Sequential()
 model.add(tf.Flatten())
-model.add(tf.Dense(10, activation='relu'))
-model.add(tf.Dense(10, activation='relu'))
-model.add(tf.Dense(10, activation='relu'))
-model.add(tf.Dense(10, activation='relu'))
+model.add(tf.Dense(128, activation='elu'))
+model.add(tf.Dense(32, activation='elu'))
+model.add(tf.Dense(32, activation='elu'))
+model.add(tf.Dense(10, activation='elu'))
 model.add(tf.Operation(operation='softmax'))
 
 model.compile(
@@ -27,13 +28,13 @@ model.compile(
   loss='categorical crossentropy',
   metrics=['accuracy'],
   batchsize = 1,
-  learning_rate=0.01,
+  learning_rate=0.1,
   epochs=100
 )
 
 model.fit(
-  train_images[:100],
-  train_labels[:100],
+  train_images[:10],
+  train_labels[:10],
   verbose=4,
   regularity=1
 )

@@ -1,14 +1,16 @@
 import sys
 import os
 # Get the directory containing 'pynet'
-pynet_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.append(pynet_dir)
-from pynet.api import synapse as tf
+current_script_dir = os.path.dirname(__file__)
+pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+sys.path.append(pynet_root_dir)
 
-from pynet.tools.visual import image_display
-from pynet.tools.scaler import argmax
-from pynet.datasets.image import mnist
-from pynet.tools.arraytools import generate_random_array
+from api import synapse as tf
+
+from tools.visual import image_display
+from tools.scaler import argmax
+from datasets.image import mnist
+from tools.arraytools import generate_random_array
 import matplotlib.pyplot as plt
 
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()

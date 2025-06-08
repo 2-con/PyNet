@@ -1,6 +1,6 @@
 
 import math
-import tools.math as math2
+from tools.math import clamp, sgn
 
 class Optimizer:
   def __init__(self):
@@ -11,12 +11,38 @@ class Optimizer:
     # regular gradient descent
     return param - lr * gradient
 
+  def Novograd(lr, param, gradient, optimizer_self, **kwargs):
+    # adaptive moment estimation
+
+    alpha = 0.9 if kwargs.get('alpha') == None else kwargs.get('alpha')
+    beta = 0.999 if kwargs.get('beta') == None else kwargs.get('beta')
+    epsilon = 1e-8 if kwargs.get('epsilon') == None else kwargs.get('epsilon')
+    timestep = kwargs.get('timestep', 1)
+    param_id = kwargs.get('param_id')
+
+    if param_id not in optimizer_self.storage_1: # M
+      optimizer_self.storage_1[param_id] = 0
+
+    if param_id not in optimizer_self.storage_2: # V
+      optimizer_self.storage_2[param_id] = 0
+
+    normalized_gradient = gradient / (abs(gradient) + epsilon)
+    
+    optimizer_self.storage_1[param_id] = (alpha * optimizer_self.storage_1[param_id]) + ((1 - alpha) * normalized_gradient)
+    optimizer_self.storage_2[param_id] = (beta * optimizer_self.storage_2[param_id]) + ((1 - beta) * gradient**2)
+
+    M_hat = optimizer_self.storage_1[param_id] / (1 - alpha**timestep)
+    V_hat = optimizer_self.storage_2[param_id] / (1 - beta**timestep)
+
+    return param - ((M_hat * lr) / (math.sqrt(V_hat) + epsilon)) 
+  
   def Adam(lr, param, gradient, optimizer_self, **kwargs):
     # adaptive moment estimation
 
     alpha = 0.9 if kwargs.get('alpha') == None else kwargs.get('alpha')
     beta = 0.999 if kwargs.get('beta') == None else kwargs.get('beta')
     epsilon = 1e-8 if kwargs.get('epsilon') == None else kwargs.get('epsilon')
+    timestep = kwargs.get('timestep', 1)
     param_id = kwargs.get('param_id')
 
     if param_id not in optimizer_self.storage_1: # M
@@ -28,11 +54,11 @@ class Optimizer:
     optimizer_self.storage_1[param_id] = (alpha * optimizer_self.storage_1[param_id]) + ((1 - alpha) * gradient)
     optimizer_self.storage_2[param_id] = (beta * optimizer_self.storage_2[param_id]) + ((1 - beta) * gradient**2)
 
-    M_hat = optimizer_self.storage_1[param_id] / (1 - alpha)
-    V_hat = optimizer_self.storage_2[param_id] / (1 - beta)
+    M_hat = optimizer_self.storage_1[param_id] / (1 - alpha**timestep)
+    V_hat = optimizer_self.storage_2[param_id] / (1 - beta**timestep)
 
     return param - ((M_hat * lr) / (math.sqrt(V_hat) + epsilon)) 
-
+  
   def RMSprop(lr, param, gradient, optimizer_self, **kwargs):
     # root mean square propagation
 
@@ -133,40 +159,48 @@ class Optimizer:
 
   def Gradclip(lr, param, gradient, optimizer_self, **kwargs):
 
-    alpha = -math.inf if kwargs.get('minimum') == None else kwargs.get('alpha')
-    beta = math.inf if kwargs.get('maximum') == None else kwargs.get('maximum')
+    alpha = -1e-4 if kwargs.get('minimum') == None else kwargs.get('alpha')
+    beta = 1e-4 if kwargs.get('maximum') == None else kwargs.get('beta')
 
-    return param - lr * math2.clamp(gradient, beta, alpha)
+    return param - lr * clamp(gradient, alpha, beta)
 
   def SGND(lr, param, gradient, optimizer_self, **kwargs):
     # sign gradient descent
 
-    return param - lr * math2.sgn(gradient)
+    return param - lr * sgn(gradient)
 
-  def Variational_Momentum(lr, param, gradient, optimizer_self, **kwargs):
-    # experimental optimizer
-
-    alpha = 1.1 if kwargs.get('alpha') == None else kwargs.get('alpha')
-    beta  = 0.9 if kwargs.get('beta') == None else kwargs.get('beta')
+  def Rprop(lr, param, gradient, optimizer_self, **kwargs):
+    """
+    by far the goofiest optimizer
+    """
+    
+    alpha = 1.1 if kwargs.get('alpha') == None else kwargs.get('alpha') # reward
+    beta  = 0.9 if kwargs.get('beta') == None else kwargs.get('beta') # punishment
+    gamma = 0.5 if kwargs.get('gamma') == None else kwargs.get('gamma') # max step size
+    epsilon = 1e-5 if kwargs.get('epsilon') == None else kwargs.get('epsilon') # min step size
 
     param_id = kwargs.get('param_id')
 
     if param_id not in optimizer_self.storage_1: # stores latest gradient
       optimizer_self.storage_1[param_id] = gradient
 
-    if param_id not in optimizer_self.storage_2: # stores spesific LR
+    if param_id not in optimizer_self.storage_2: # stores latest gradient
       optimizer_self.storage_2[param_id] = lr
-
-    if optimizer_self.storage_1[param_id] * gradient >= 0:
-      new_LR = lr * alpha
+    
+    if sgn(optimizer_self.storage_1[param_id]) == sgn(gradient):
+      new_LR = optimizer_self.storage_2[param_id] * alpha
+      optimizer_self.storage_1[param_id] = gradient
 
     else:
-      new_LR = lr * beta
+      new_LR = optimizer_self.storage_2[param_id] * beta
+      gradient = 0
+      optimizer_self.storage_1[param_id] = gradient
 
-    optimizer_self.storage_1[param_id] = gradient
+    new_LR = clamp(new_LR, epsilon, gamma)  # clamp the learning rate
+    
     optimizer_self.storage_2[param_id] = new_LR
-
-    return param - new_LR * gradient
+    
+    return param - new_LR * sgn(gradient)
 
   def Momentum(lr, param, gradient, optimizer_self, **kwargs):
     # momentum

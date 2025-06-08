@@ -53,7 +53,7 @@ def Categorical_crossentropy(ytrue:list, ypred:list):
   for i in range(len(ytrue)):
     
     if not 0 <= ypred[i] <= 1:
-      raise ValueError(f"Predicted probabilities must be between 0 and 1 and not {ypred[i]} ({ypred})")
+      raise ValueError(f"Predicted probabilities must be between 0 and 1 and not {ypred[i]}")
     
     if ytrue[i] == 1:
       answer -= math.log(ypred[i] + 1e-15)

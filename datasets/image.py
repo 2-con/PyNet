@@ -46,7 +46,7 @@ class mnist:
   def __init__(self, one_hot=False, normalized=False):
     self.one_hot = one_hot
     self.normalized = normalized
-    with open(r'C:\Users\User\OneDrive\Desktop\homework\Coding\Python\pynet\datasets\mnist.json', 'r') as f:
+    with open(r'datasets\mnist.json', 'r') as f:
       self.data = json.load(f)
   
   def load(self):

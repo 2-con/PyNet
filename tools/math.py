@@ -7,7 +7,14 @@ Contains useful math functions that are not part of Numpy or Python
 import math
 
 def sgn(x):
-  """Returns the sign of a number."""
+  """
+  Sign
+  -----
+    Returns the sign of a number.
+  -----
+  Args:
+    x (int / float): The number to check the sign of.
+  """
   if x > 0:
     return 1
   elif x < 0:
@@ -16,11 +23,29 @@ def sgn(x):
     return 0
 
 def clamp(x, a, b):
-  """Clamps a value within a specified range."""
+  """
+  Clamp
+  -----
+    Clamps a value within a specified range.
+  -----
+  Args:
+    a (int / float): The minimum value of the range.
+    b (int / float): The maximum value of the range.
+    x (int / float): The value to clamp.
+  """
   return max(min(x, b), a)
 
 def lerp(a, b, t):
-  """Linear interpolation between two values."""
+  """
+  Linear Interpolation
+  -----
+    Linear interpolation between two values.
+  -----
+  Args:
+    a (int / float): The start value.
+    b (int / float): The end value.
+    t (float): The interpolation factor, typically between 0 and 1.  
+  """
   return a + t * (b - a)
 
 def smoothstep(edge0, edge1, x):

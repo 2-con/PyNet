@@ -107,17 +107,29 @@ Optimizer = optimizer.Optimizer # set global object
   convolution backpropagation is wrong. error gradients from the versions are always 0, it might originated from the
   backpropagation since the activations are working correctly
 
+5/6/2025
+
+  the LSTM isnt working at all, on top of doing the wrong calculations (a small part of it, most of the calculations are correct),
+  i forgot to add the part where YOU UPDATE THE WEIGHTS AND BIASES
+  
+  LIKE BRO THE WEIGHTS ARE CALCULATED BUT ARE NOT DOING ANYTHING
+  like i was supposed to do something like this:
+    new weight = do_something(blah blah blah)
+  but instead i did this:
+    do_something(blah blah blah)
+  
+  i will combust
+
 """
 
-""" ideas list:
+""" TODO:
 
-  - code trace the training process, the training process should be flawlessly optimized and streamlined
-  since pure python is notoriously slow
+  - impliment the parallel class
 
 """
 
 #######################################################################################################
-#                                         Internal Classes                                            #
+#                                         Internal Functions                                          #
 #######################################################################################################
 
 class Key:
@@ -206,8 +218,9 @@ class Key:
     'sgnd': Optimizer.SGND,
     'default': Optimizer.Default,
     'none': Optimizer.Default,
-    'variational momentum': Optimizer.Variational_Momentum,
+    'rprop': Optimizer.Rprop,
     'momentum': Optimizer.Momentum,
+    'novograd': Optimizer.Novograd,
   }
 
   METRICS = {
@@ -346,9 +359,9 @@ class Sequential:
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
-    - SGND (Sign Gradient Descent)
+    - SGND        (Sign Gradient Descent)
     - Default     (PyNet descent)
-    - Variational Momentum
+    - Rprop       (Resilient propagation)
     - Momentum
     - None        (Gradient Descent)
 
@@ -396,7 +409,7 @@ class Sequential:
     self.gamma = kwargs.get('gamma', None)
     self.delta = kwargs.get('delta', None)
 
-    self.experimental = kwargs.get('experimental', 'none')
+    self.experimental = kwargs.get('experimental', [])
 
     self.is_compiled = True
 
@@ -449,24 +462,24 @@ class Sequential:
       if self.RNN:
         
         input_index = 0
-        carry = 0
-        carryWS = 0
+        output = 0
+        outputWS = 0
         for layer in self.layers: # get activations
           
           if layer.accept_input:
             
-            output, carry = layer.apply(x[input_index], carry)
+            output = layer.apply(x[input_index], output)
             
             activations.append([input[input_index], output])
             
-            outputWS, carryWS = layer.get_weighted_sum(x[input_index], carry)
+            outputWS = layer.get_weighted_sum(x[input_index], output)
             
             input_index += 1
             
           else:
-            output, carry = layer.apply(0, carry)
+            output = layer.apply(0, output)
             activations.append([0, output])
-            outputWS, carryWS = layer.get_weighted_sum(0, carry)
+            outputWS = layer.get_weighted_sum(0, output)
           
           weighted_sums.append(outputWS)
       
@@ -490,6 +503,29 @@ class Sequential:
             LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(0, long_memory, short_memory)
           
           weighted_sums.append([LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term])
+      
+      elif self.GRU:
+        input_index = 0
+        output = 0
+        outputWS = 0
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            
+            output = layer.apply(x[input_index], output)
+            
+            activations.append([input[input_index], output])
+            
+            outputWS = layer.get_weighted_sum(x[input_index], output)
+            
+            input_index += 1
+            
+          else:
+            output = layer.apply(0, output)
+            activations.append([0, output])
+            outputWS = layer.get_weighted_sum(0, output)
+          
+          weighted_sums.append(outputWS)
       
       else: # any other type of network
         x = input[:]
@@ -521,11 +557,28 @@ class Sequential:
       errors = [0] * ( len(self.layers) )
       initial_gradient = []
       
-      if self.RNN:
-        predicted = [cell[1] for cell in activations[1:]]
-      
+      if self.RNN or self.GRU:
+        # predicted = [cell[1] for cell in activations[1:]]
+        
+        predicted = []
+        for layer_index, lstm_layer in enumerate(self.layers):
+          if lstm_layer.return_output:
+            predicted.append(activations[layer_index+1][1])
+          else:
+            predicted.append(0)
+            
       elif self.LSTM:
-        predicted = [cell[2] for cell in activations[1:]]
+        
+        # predicted = [cell[2] for cell in activations[1:]]
+        LSTM_incoming_input = [cell[2] for cell in activations[1:]]
+        predicted = LSTM_incoming_input
+        
+        predicted = []
+        for layer_index, lstm_layer in enumerate(self.layers):
+          if lstm_layer.return_output:
+            predicted.append(activations[layer_index+1][2])
+          else:
+            predicted.append(0)
         
       else:
         predicted = activations[-1]
@@ -560,7 +613,7 @@ class Sequential:
           initial_gradient = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
 
         else: # defaults to MSE if loss is ambiguous
-          initial_gradient = [(2 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
+          initial_gradient = [(1 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
 
         output_layer_errors = []
 
@@ -648,34 +701,35 @@ class Sequential:
           out_error = initial_gradient[-1]
           
           incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
-          incoming_input = predicted[-1]
+          incoming_input = LSTM_incoming_input[-1]
           
           ST_weights = self.layers[-1].short_term_weights
           extra_weights = self.layers[-1].extra_weights
+          input_weights = self.layers[-1].input_weights
           
           total_error = out_error + S_error
           
           # calculate OUT
           
           out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
-          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error # calculate [a]
-          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error # calculate [b]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
           
-          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
-          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
           
           # calculate OUT
           
-          merged_D = 1 * A
+          merged_D = 1 * A 
           short_D = incoming_ST * A
           input_D = incoming_input * A
           
           # calculate INPUT GATE
           
-          B_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
-          C_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
           
-          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) *  B_gate_error
           merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
           
           input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
@@ -692,12 +746,12 @@ class Sequential:
           
           # calculate CARRY
           
-          carry_ST = (ST_weights[0] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B * incoming_LT) + \
+          carry_ST = (ST_weights[0] * A) + \
                      (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
                      (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
                      (ST_weights[3] * A)
           
-          carry_LT = B * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+          carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
           
           output_layer_errors = [carry_LT, carry_ST, 
                                  [merged_A, merged_B, merged_C, merged_D], 
@@ -709,6 +763,53 @@ class Sequential:
           # print(output_layer_errors)
           # exit()
         
+        elif type(self.layers[-1]) == GRU: # if its a GRU layer
+          this_layer = self.layers[-1]
+          carry_error = 0
+          out_error = initial_gradient[-1]
+          
+          input_weights = this_layer.input_weights
+          carry_weights = this_layer.carry_weights
+          
+          total_error = out_error + carry_error
+          final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[-1]
+          
+          # output gate
+          
+          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+
+          # update gate
+          
+          error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
+                    
+          bias_B  = 1              * error_B
+          input_B = incoming_input * error_B
+          carry_B = incoming_carry * error_B
+          
+          # reset gate
+          
+          error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+
+          bias_A  = 1              * error_A
+          input_A = incoming_input * error_A
+          carry_A = incoming_carry * error_A
+          
+          # calculate upstream gradient
+          
+          carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
+                        ( carry_weights[1] * error_B                                                                                                                                                          ) + \
+                        ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
+                        ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+          
+          output_layer_errors = [
+                                  carry_error, 
+                                 [bias_A, bias_B, bias_C], 
+                                 [carry_A, carry_B, carry_C], 
+                                 [input_A, input_B, input_C]
+                                ]
+          
       errors[-1] = output_layer_errors
 
       for this_layer_index in reversed(range(len(self.layers)-1)):
@@ -772,13 +873,6 @@ class Sequential:
                   # Calculate the corresponding position in layer_errors
                   output_row = a + kernel_row
                   output_col = b + kernel_col
-
-                  # calculate the derivative
-                  #derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
-
-                  # Check if the calculated position is within the bounds of the input
-                  # if 0 <= output_row < len(layer_errors) and 0 <= output_col < len(layer_errors[0]):
-                  #   layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col]
                   
                   # Accumulate the weighted error
                   layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] #* derivative
@@ -984,35 +1078,36 @@ class Sequential:
           
           L_error   = prev_errors[0]
           S_error   = prev_errors[1]
-          out_error = prev_errors[1] if this_layer.return_output else 0
+          out_error = initial_gradient[this_layer_index] if this_layer.return_output else 0
           
           incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[this_layer_index]
-          incoming_input = predicted[this_layer_index]
+          incoming_input = LSTM_incoming_input[this_layer_index]
           
           ST_weights = self.layers[this_layer_index].short_term_weights
           extra_weights = self.layers[this_layer_index].extra_weights
+          input_weights = self.layers[this_layer_index].input_weights
           
           total_error = out_error + S_error
           
           # calculate OUT
           
           out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
-          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[1] * total_error # calculate [a]
-          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term) * extra_weights[0] * total_error # calculate [b]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
           
-          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_short_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
-          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_short_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
           
           # calculate OUT
           
-          merged_D = 1 * A
+          merged_D = 1 * A 
           short_D = incoming_ST * A
           input_D = incoming_input * A
           
           # calculate INPUT GATE
           
-          B_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
-          C_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
           
           merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
           merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
@@ -1025,18 +1120,18 @@ class Sequential:
           
           # calculate FORGET GATE
           
-          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B 
           short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
           input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
           
           # calculate CARRY
           
-          carry_ST = (ST_weights[0] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B * incoming_LT) + \
+          carry_ST = (ST_weights[0] * A) + \
                      (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
                      (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
                      (ST_weights[3] * A)
           
-          carry_LT = B * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+          carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
           
           layer_errors = [carry_LT, carry_ST, 
                           [merged_A, merged_B, merged_C, merged_D], 
@@ -1051,12 +1146,57 @@ class Sequential:
         elif type(this_layer) == GRU:
           if type(prev_layer) != GRU:
             raise SystemError(f'GRU layer must be preceded by a GRU layer and not {type(prev_layer)}')
-        
+
+          carry_error = prev_errors[0]
+          out_error   = initial_gradient[this_layer_index]
+          
+          input_weights = this_layer.input_weights
+          carry_weights = this_layer.carry_weights
+          
+          total_error = out_error + carry_error
+          final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[this_layer_index]
+          
+          # output gate
+          
+          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+
+          # update gate
+          
+          error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
+                    
+          bias_B  = 1              * error_B
+          input_B = incoming_input * error_B
+          carry_B = incoming_carry * error_B
+          
+          # reset gate
+          
+          error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+
+          bias_A  = 1              * error_A
+          input_A = incoming_input * error_A
+          carry_A = incoming_carry * error_A
+          
+          # calculate upstream gradient
+          
+          carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
+                        ( carry_weights[1] * error_B                                                                                                                                                          ) + \
+                        ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
+                        ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+          
+          layer_errors = [
+                          carry_error, 
+                          [bias_A, bias_B, bias_C], 
+                          [carry_A, carry_B, carry_C], 
+                          [input_A, input_B, input_C]
+                         ]
+          
         errors[this_layer_index] = layer_errors[:]
 
       return errors
     
-    def update(activations, weighted_sum, errors, learning_rate):
+    def update(activations, weighted_sum, errors, learning_rate, timestep):
 
       alpha = self.alpha
       beta = self.beta
@@ -1087,11 +1227,12 @@ class Sequential:
               for error_versions in errors:
                 weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
 
-              weight_gradient /= len(errors)
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                weight_gradient /= len(errors)
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
             # Updating bias
             bias_gradient = 0
@@ -1099,11 +1240,11 @@ class Sequential:
             for error_versions in errors:
               bias_gradient += error_versions[this_layer_index][neuron_index]
 
-            if self.optimizer not in ('none', ''):
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
               bias_gradient /= len(errors)
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Convolution and layer.learnable:
 
@@ -1144,18 +1285,18 @@ class Sequential:
 
               param_id += 1
 
-              if self.optimizer not in ('none', ''):
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
                 weight_gradient[a][b] /= len(errors)
 
-              layer.kernel[a][b] = optimize(learning_rate, layer.kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+              layer.kernel[a][b] = optimize(learning_rate, layer.kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
           if layer.use_bias:
             param_id += 1
 
-            if self.optimizer not in ('none', ''):
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
               bias_gradient /= len(errors)
 
-            layer.bias = optimize(learning_rate, layer.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            layer.bias = optimize(learning_rate, layer.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         elif type(layer) == AFS and layer.learnable:
 
@@ -1168,10 +1309,11 @@ class Sequential:
             for error_versions in errors:
               weight_gradient += error_versions[this_layer_index][this_neuron_index] * prev_activations[this_neuron_index]
 
-            weight_gradient /= len(errors)
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+              weight_gradient /= len(errors)
 
             param_id += 1
-            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
             # calculate bias gradient
             if layer.use_bias:
@@ -1180,11 +1322,11 @@ class Sequential:
               for error_versions in errors:
                 bias_gradient += error_versions[this_layer_index][this_neuron_index]
 
-              if self.optimizer not in ('none', ''):
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
                 bias_gradient /= len(errors)
 
               param_id += 1
-              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Localunit and layer.learnable:
 
@@ -1198,11 +1340,12 @@ class Sequential:
               for error_versions in errors:
                 weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
 
-              weight_gradient /= len(errors)
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                weight_gradient /= len(errors)
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
             # Updating bias
 
@@ -1211,11 +1354,11 @@ class Sequential:
             for error_versions in errors:
               bias_gradient += error_versions[this_layer_index][neuron_index]
 
-            if self.optimizer not in ('none', ''):
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
               bias_gradient /= len(errors)
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Recurrent and layer.learnable:
           Wa_gradient = 0
@@ -1227,17 +1370,17 @@ class Sequential:
             Wb_gradient += error_version[this_layer_index][1]
             B_gradient  += error_version[this_layer_index][2]
 
-          if self.optimizer not in ('none', ''):
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             Wa_gradient /= len(errors)
             Wb_gradient /= len(errors)
             B_gradient  /= len(errors)
 
           param_id += 1
-          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
           param_id += 1
-          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
           param_id += 1
-          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
         
         elif type(layer) == LSTM and layer.learnable:
           
@@ -1252,7 +1395,7 @@ class Sequential:
             INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][4][i] for i in range(4)]
             EXTRA_ERR = [EXTRA_ERR[i] + error_version[this_layer_index][5][i] for i in range(3)]
             
-          if self.optimizer not in ('none', ''):
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             B_ERR     = [a / len(errors) for a in B_ERR]
             ST_ERR    = [b / len(errors) for b in ST_ERR]
             INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
@@ -1260,20 +1403,49 @@ class Sequential:
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
-            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.short_term_weights):
             param_id += 1
-            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
-            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.extra_weights):
             param_id += 1
-            layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id)
+            if layer.version == 'statquest':
+              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
         
+        elif type(layer) == GRU and layer.learnable:
+          
+          B_ERR     = [0] * 3 # biases
+          C_ERR     = [0] * 3 # short term weights
+          INPUT_ERR = [0] * 3 # input weights
+          
+          for error_version in errors:
+            B_ERR     = [B_ERR[i]     + error_version[this_layer_index][1][i] for i in range(3)]
+            C_ERR     = [C_ERR[i]     + error_version[this_layer_index][2][i] for i in range(3)]
+            INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][3][i] for i in range(3)]
+            
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+            B_ERR     = [a / len(errors) for a in B_ERR]
+            C_ERR     = [b / len(errors) for b in C_ERR]
+            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+          
+          for index, bias in enumerate(layer.biases):
+            param_id += 1
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+          for index, weight in enumerate(layer.carry_weights):
+            param_id += 1
+            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+          for index, weight in enumerate(layer.input_weights):
+            param_id += 1
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          
     #################################################################################################
     #                                     Automatic Fitting                                         #
     #################################################################################################
@@ -1306,6 +1478,8 @@ class Sequential:
     calibrate_afs = False
     calibrate_localunit = False
     calibrate_operation = False
+    
+    timestep = 1
     
     # calibration and structure intialization
     for _ in range(2):
@@ -1440,6 +1614,8 @@ class Sequential:
     self.RNN  = any(type(layer) == Recurrent for layer in self.layers)
     self.LSTM = any(type(layer) == LSTM for layer in self.layers)
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
+    self.mLSTM = any(type(layer) == mLSTM for layer in self.layers)
+    self.sLSTM = any(type(layer) == sLSTM for layer in self.layers)
     
     # main training loop - iterate over the epochs
     for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if verbose==1 else range(epochs):
@@ -1481,8 +1657,13 @@ class Sequential:
             target = targets[base_index + batch_index]
           
           epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], predicted)
-
-        update(activations, weighted_sums, errors, learning_rate)
+        
+        timestep += 1
+        
+        if 'frozenTS' in self.experimental:
+          timestep = 1
+        
+        update(activations, weighted_sums, errors, learning_rate, timestep)
         errors = []
 
       self.error_logs.append(epoch_loss)
@@ -1546,18 +1727,18 @@ class Sequential:
 
     if self.RNN:
 
-      carry = 0      
+      output = 0      
       input_index = 0
       answer = []
       
       for layer in self.layers:
 
         if layer.accept_input:
-          output, carry = layer.apply(x[input_index], carry)
+          output = layer.apply(x[input_index], output)
           input_index += 1
           
         else:
-          output, carry = layer.apply(0, carry)
+          output = layer.apply(0, output)
 
         if layer.return_output:
           answer.append(output)
@@ -1584,7 +1765,27 @@ class Sequential:
           answer.append(short_term)
       
       return answer
+    
+    elif self.GRU:
       
+      output = 0
+      input_index = 0
+      answer = []
+      
+      for layer in self.layers:
+
+        if layer.accept_input:
+          output = layer.apply(x[input_index], output)
+          input_index += 1
+          
+        else:
+          output = layer.apply(0, output)
+
+        if layer.return_output:
+          answer.append(output)
+      
+      return answer
+    
     else:
     
       for layer in self.layers:
@@ -1693,7 +1894,1442 @@ class Sequential:
     print()
 
 #######################################################################################################
-#                                      Sequential Model Classes                                       #
+#                                           Parallel Class                                            #
+#######################################################################################################
+
+class Parallel:
+  # pre-processing
+
+  def __init__(self, *args):
+    """
+    Parallel object
+    ======
+      Must contain compatible layers to parallelize dataflow
+    -----
+
+    Compatible layers:
+    - Convolution
+    - Maxpooling
+    - Meanpooling
+    - Flatten
+    - Reshape
+    - Dense
+    - AFS (Adaptive Feature Scaler)
+
+    Additional info:
+    - Input neurons are not neccecary, they are automatically handled during model fitting
+
+
+    """
+    self.layers = list(args) if args != None else []
+
+    # defined during compiling
+    self.optimizer      = None # name
+    self.loss           = None # name
+    self.metrics        = None # name
+    self.learning_rate  = None
+    self.epochs         = None
+
+    self.is_compiled    = False # if the model is already compiled
+    self.is_trained     = False # if the model is already fitted
+    self.is_validated   = False # if the model is already validated
+
+    self.error_logs = []
+
+    self.optimizer_instance = Optimizer()
+
+  def compile(self, optimizer, loss, learning_rate, epochs, metrics, **kwargs):
+    """
+    
+
+    """
+    self.optimizer = optimizer.lower()
+    self.loss = loss.lower()
+    self.learning_rate = learning_rate
+    self.batchsize = kwargs.get('batchsize', 1)
+
+    self.alpha = kwargs.get('alpha', None) # momentum decay
+    self.beta = kwargs.get('beta', None)
+    self.epsilon = kwargs.get('epsilon', None) # zerodivison prevention
+    self.gamma = kwargs.get('gamma', None)
+    self.delta = kwargs.get('delta', None)
+
+    self.experimental = kwargs.get('experimental', [])
+
+    self.is_compiled = True
+
+    # Structure - error prevention
+    if self.layers == [] or self.layers is None:
+      raise ValueError("No layers in model")
+    for layer_index, layer in enumerate(self.layers):
+      if type(layer) not in (Dense, Convolution, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit, Recurrent, LSTM, GRU):
+        raise TypeError(f"Unknown layer type '{layer.__class__.__name__ }' at layer {layer_index+1}")
+
+    # Kwargs - error prevention
+    if learning_rate <= 0:
+      raise ValueError("learning_rate must be greater than 0")
+    if type(learning_rate) != float:
+      raise TypeError("learning_rate must be a float")
+    if type(epochs) != int:
+      raise TypeError("epochs must be an int")
+    if epochs <= 0:
+          raise ValueError("epochs must be greater than 0")
+
+    # Compiler - error prevention
+    if self.optimizer is None:
+      raise ValueError("Optimizer not set")
+    if self.optimizer not in Key.OPTIMIZER:
+      raise ValueError(f"Invalid optimizer {self.optimizer}")
+    if self.loss is None:
+      raise ValueError("Loss not set")
+    if self.metrics == None:
+      raise ValueError("Metrics not set")
+
+  # processing
+
+  def fit(self, features, targets, **kwargs):
+    """
+    Args
+    -----
+    - features (list)  : the features to use
+    - targets  (list)  : the corresponding targets to use
+
+    - (optional) verbose       (int) : whether to show anything during training
+    - (optional) regularity    (int) : how often to show training stats
+    - (optional) decimals      (int) : how many decimals to show
+    """
+    def Propagate(input):
+
+      x = input[:]
+      activations = [x]
+      weighted_sums = []
+
+      if self.RNN:
+        
+        input_index = 0
+        output = 0
+        outputWS = 0
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            
+            output = layer.apply(x[input_index], output)
+            
+            activations.append([input[input_index], output])
+            
+            outputWS = layer.get_weighted_sum(x[input_index], output)
+            
+            input_index += 1
+            
+          else:
+            output = layer.apply(0, output)
+            activations.append([0, output])
+            outputWS = layer.get_weighted_sum(0, output)
+          
+          weighted_sums.append(outputWS)
+      
+      elif self.LSTM:
+        
+        long_memory = 0
+        short_memory = 0
+        input_index = 0
+        
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            long_memory, short_memory = layer.apply(input[input_index], long_memory, short_memory)
+            activations.append([input[input_index], long_memory, short_memory])
+            LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(input[input_index], long_memory, short_memory)
+            input_index += 1
+          
+          else:
+            long_memory, short_memory = layer.apply(0, long_memory, short_memory)
+            activations.append([0, long_memory, short_memory])
+            LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = layer.get_weighted_sum(0, long_memory, short_memory)
+          
+          weighted_sums.append([LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term])
+      
+      elif self.GRU:
+        input_index = 0
+        output = 0
+        outputWS = 0
+        for layer in self.layers: # get activations
+          
+          if layer.accept_input:
+            
+            output = layer.apply(x[input_index], output)
+            
+            activations.append([input[input_index], output])
+            
+            outputWS = layer.get_weighted_sum(x[input_index], output)
+            
+            input_index += 1
+            
+          else:
+            output = layer.apply(0, output)
+            activations.append([0, output])
+            outputWS = layer.get_weighted_sum(0, output)
+          
+          weighted_sums.append(outputWS)
+      
+      else: # any other type of network
+        x = input[:]
+        xWS = 0
+        for layer in self.layers:
+          
+          if type(layer) in (Convolution, Dense, AFS, Operation, Localunit):
+            xWS = layer.get_weighted_sum(x)
+            weighted_sums.append(xWS)
+
+          else:
+            weighted_sums.append(x)
+            
+          x = layer.apply(x)
+          activations.append(x)  
+
+      return activations, weighted_sums
+
+    def Backpropagate(activations, weighted_sums, target):
+
+      def index_corrector(index):
+        if index < 0:
+          return None
+        elif index > prev_layer.receptive_field - 1:
+          return None
+        else:
+          return index
+
+      errors = [0] * ( len(self.layers) )
+      initial_gradient = []
+      
+      if self.RNN or self.GRU:
+        # predicted = [cell[1] for cell in activations[1:]]
+        
+        predicted = []
+        for layer_index, lstm_layer in enumerate(self.layers):
+          if lstm_layer.return_output:
+            predicted.append(activations[layer_index+1][1])
+          else:
+            predicted.append(0)
+            
+      elif self.LSTM:
+        
+        # predicted = [cell[2] for cell in activations[1:]]
+        LSTM_incoming_input = [cell[2] for cell in activations[1:]]
+        predicted = LSTM_incoming_input
+        
+        predicted = []
+        for layer_index, lstm_layer in enumerate(self.layers):
+          if lstm_layer.return_output:
+            predicted.append(activations[layer_index+1][2])
+          else:
+            predicted.append(0)
+        
+      else:
+        predicted = activations[-1]
+      
+      if True: # calculate the initial gradient
+
+        if self.loss == 'total squared error':
+          initial_gradient = [(pred - true) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'mean abseloute error':
+          initial_gradient = [math2.sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'total abseloute error':
+          initial_gradient = [math2.sgn(pred - true) for pred, true in zip(predicted, target)]
+
+        elif self.loss == 'categorical crossentropy':
+
+          initial_gradient = [-true / pred if pred != 0 else -1000 for true, pred in zip(target, predicted)]
+
+        elif self.loss == 'sparse categorical crossentropy':
+
+          initial_gradient = [-(true == i) / pred if pred != 0 else -1000 for i, pred, true in zip(range(len(predicted)), predicted, target)]
+
+        elif self.loss == 'binary crossentropy':
+
+          initial_gradient = [
+                              -1 / pred if true == 1 else 1 / (1 - pred) if pred < 1 else 1000
+                              for true, pred in zip(target, predicted)
+          ]
+
+        elif self.loss == 'hinge loss':
+          initial_gradient = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
+
+        else: # defaults to MSE if loss is ambiguous
+          initial_gradient = [(1 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
+
+        output_layer_errors = []
+
+        if type(self.layers[-1]) == Operation:
+
+          this_WS = weighted_sums[-1]
+          this_activations = activations[-1]
+          this_layer = self.layers[-1]
+          derivative_list = []
+
+          if self.layers[-1].operation == 'min max scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'standard scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'max abs scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'robust scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+          elif self.layers[-1].operation == 'softmax':
+            derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
+
+            sqrt_size = int(len(derivative_list)**0.5)
+            derivative_list = arraytools.reshape(derivative_list, sqrt_size, sqrt_size)
+
+            num_outputs = len(initial_gradient)
+            num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
+
+            for j in range(num_inputs): # Iterate through the columns of the Jacobian (inputs of softmax)
+              result = 0
+              for i in range(num_outputs): # Iterate through the rows of the Jacobian (outputs of softmax) and elements of initial_gradient
+                result += initial_gradient[i] * derivative_list[i][j]
+              output_layer_errors.append(result)
+
+          else: # if its a regular operation
+
+            derivative_list = [Key.ACTIVATION_DERIVATIVE[this_layer.operation](a) for a in this_WS]
+
+            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+        elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
+
+          for error, weighted in zip(initial_gradient, weighted_sums[-1]):
+            derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
+            output_layer_errors.append(error * derivative)
+
+        elif type(self.layers[-1]) == Flatten: # if its a flatten layer
+
+          sizex, sizey = self.layers[-1].input_shape
+
+          output_layer_errors = arraytools.reshape(initial_gradient[:], sizex, sizey)
+
+        elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
+          recurrent_output_errors = initial_gradient[:]
+          
+          error_C = initial_gradient[-1]
+          error_D = 0
+          total_error = error_C + error_D
+          
+          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1])
+          
+          error_Wa = derivative * total_error * activations[-1][0]
+          error_Wb = derivative * total_error * activations[-1][1]
+          error_B  = derivative * total_error
+          error_a  = derivative * total_error * self.layers[-1].carry_weight
+          
+          output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
+        
+        elif type(self.layers[-1]) == LSTM: # if its a LSTM layer
+          this_layer = self.layers[-1]
+          
+          L_error   = 0
+          S_error   = 0
+          out_error = initial_gradient[-1]
+          
+          incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
+          incoming_input = LSTM_incoming_input[-1]
+          
+          ST_weights = self.layers[-1].short_term_weights
+          extra_weights = self.layers[-1].extra_weights
+          input_weights = self.layers[-1].input_weights
+          
+          total_error = out_error + S_error
+          
+          # calculate OUT
+          
+          out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
+          
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+          
+          # calculate OUT
+          
+          merged_D = 1 * A 
+          short_D = incoming_ST * A
+          input_D = incoming_input * A
+          
+          # calculate INPUT GATE
+          
+          B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
+          
+          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) *  B_gate_error
+          merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
+          
+          input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          
+          input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          
+          # calculate FORGET GATE
+          
+          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          
+          # calculate CARRY
+          
+          carry_ST = (ST_weights[0] * A) + \
+                     (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                     (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                     (ST_weights[3] * A)
+          
+          carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
+          
+          output_layer_errors = [carry_LT, carry_ST, 
+                                 [merged_A, merged_B, merged_C, merged_D], 
+                                 [short_A, short_B, short_C, short_D], 
+                                 [input_A, input_B, input_C, input_D], 
+                                 [out_a, out_b, out_we]
+                                ]
+          
+          # print(output_layer_errors)
+          # exit()
+        
+        elif type(self.layers[-1]) == GRU: # if its a GRU layer
+          this_layer = self.layers[-1]
+          carry_error = 0
+          out_error = initial_gradient[-1]
+          
+          input_weights = this_layer.input_weights
+          carry_weights = this_layer.carry_weights
+          
+          total_error = out_error + carry_error
+          final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[-1]
+          
+          # output gate
+          
+          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+
+          # update gate
+          
+          error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
+                    
+          bias_B  = 1              * error_B
+          input_B = incoming_input * error_B
+          carry_B = incoming_carry * error_B
+          
+          # reset gate
+          
+          error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+
+          bias_A  = 1              * error_A
+          input_A = incoming_input * error_A
+          carry_A = incoming_carry * error_A
+          
+          # calculate upstream gradient
+          
+          carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
+                        ( carry_weights[1] * error_B                                                                                                                                                          ) + \
+                        ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
+                        ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+          
+          output_layer_errors = [
+                                  carry_error, 
+                                 [bias_A, bias_B, bias_C], 
+                                 [carry_A, carry_B, carry_C], 
+                                 [input_A, input_B, input_C]
+                                ]
+          
+      errors[-1] = output_layer_errors
+
+      for this_layer_index in reversed(range(len(self.layers)-1)):
+        # FRONT | next layer --> this layer --> previous layer | BACK
+
+        this_layer = self.layers[this_layer_index]
+        this_activations = activations[this_layer_index]
+
+        this_WS = weighted_sums[this_layer_index]
+
+        prev_errors = errors[this_layer_index + 1]
+        prev_layer = self.layers[this_layer_index + 1]
+
+        layer_errors = []
+
+        if type(this_layer) in (Dense, AFS, Localunit):
+
+          for this_neuron_index, _ in enumerate(this_layer.neurons):
+
+            neuron_error = []
+
+            derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
+
+            if type(prev_layer) == Dense:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == AFS:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+            elif type(prev_layer) == Operation:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+            elif type(prev_layer) == Localunit:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+        elif type(this_layer) == Convolution:
+
+          kernel = this_layer.kernel[:]
+
+          layer_errors = arraytools.generate_array(value=0, *this_layer.input_shape)
+
+          for a in range(len(layer_errors) - (len(this_layer.kernel) - 1)):
+            for b in range(len(layer_errors[0]) - (len(this_layer.kernel[0]) - 1)):
+
+              # Apply the flipped kernel to the corresponding region in layer_errors
+              for kernel_row in range(len(kernel)):
+                for kernel_col in range(len(kernel[0])):
+                  
+                  # Calculate the corresponding position in layer_errors
+                  output_row = a + kernel_row
+                  output_col = b + kernel_col
+                  
+                  # Accumulate the weighted error
+                  layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] #* derivative
+
+        elif type(this_layer) == Flatten:
+
+          for this_neuron_index in range(len(this_layer.neurons)):
+
+            neuron_error = []
+
+            if type(prev_layer) == Dense:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+            elif type(prev_layer) == AFS:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
+
+            elif type(prev_layer) == Operation:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                neuron_error.append(prev_errors[prev_neuron_index])
+
+            elif type(prev_layer) == Localunit:
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+            layer_errors.append( sum(neuron_error) )
+
+          sizex, sizey = this_layer.input_shape
+
+          layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
+
+        elif type(this_layer) == Reshape:
+
+          sizex, sizey = this_layer.input_shape
+
+          layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
+
+        elif type(this_layer) == Maxpooling:
+          thisx, thisy = this_layer.input_size
+
+          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+          skibidi = -1
+
+          # iterate over all the layers
+          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+
+            skibidi += 1
+            toilet = -1
+
+            # # iterate over all the elements in the layer
+            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+              toilet += 1
+
+              # # control the vertical
+              # for c in range(this_layer.size):
+
+              #   # control the horizontal
+              #   for d in range(this_layer.size):
+
+              #     if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
+
+              #       # if the current element is the maximum value, send it all the error gradient
+
+              #       if (weighted_sums[this_layer_index-1][a+c][b+d] == this_WS[skibidi][toilet]):
+              #         layer_errors[a+c][b+d] += prev_errors[skibidi][toilet]
+
+              # ==========
+
+              max_value = this_WS[skibidi][toilet]  # Get the maximum value
+              count = 0  # Count of elements with the maximum value
+
+              # Find all elements with the maximum value in the pooling window
+              for c in range(this_layer.size):
+                for d in range(this_layer.size):
+                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
+                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
+                      count += 1
+
+              # Distribute the gradient equally among the maximum elements
+              for c in range(this_layer.size):
+                for d in range(this_layer.size):
+                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
+                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
+                      layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+
+        elif type(this_layer) == Meanpooling:
+
+          thisx, thisy = this_layer.input_size
+
+          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+          # for meanpooling, we need to distribute the error over the kernel size
+          # this is done by dividing the error by the kernel size (averaging it over the kernel size)
+
+          skibidi = -1
+
+          # iterate over all the layers
+          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+
+            skibidi += 1
+            toilet = -1
+
+            # iterate over all the elements in the layer
+            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+              toilet += 1
+
+              # control the vertical
+              for c in range(this_layer.size):
+
+                # control the horizontal
+                for d in range(this_layer.size):
+
+                  if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
+
+                    # distribute the error over the kernel size
+
+                    layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (this_layer.size**2)
+
+        elif type(this_layer) == Operation:
+
+          if this_layer.operation == 'min max scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
+
+          elif this_layer.operation == 'standard scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
+
+          elif this_layer.operation == 'max abs scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
+
+          elif this_layer.operation == 'robust scaler':
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+
+          elif this_layer.operation == 'softmax':
+            derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
+
+          for this_neuron_index in range(len(this_layer.neurons)):
+
+            neuron_error = []
+
+            if this_layer.operation in Key.ACTIVATION_DERIVATIVE:
+              derivative = Key.ACTIVATION_DERIVATIVE[this_layer.operation](this_WS[this_neuron_index])
+            else:
+              derivative = derivative_list[this_neuron_index]
+
+            if type(prev_layer) == Dense:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == AFS:
+
+              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+            elif type(prev_layer) == Operation:
+              layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+            elif type(prev_layer) == Localunit:
+
+              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+              layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(prev_layer) == Reshape:
+
+              layer_errors.append( prev_errors[this_neuron_index] )
+
+        elif type(this_layer) == Recurrent:
+          if type(prev_layer) != Recurrent:
+            raise SystemError(f'Recurrent layer must be preceded by a Recurrent layer and not {type(prev_layer)}')
+          
+          error_C = recurrent_output_errors[this_layer_index]
+          error_D = prev_errors[3]
+          
+          if this_layer.return_output:
+            total_error = error_C + error_D
+          else:
+            total_error = error_D
+          
+          derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS)
+          
+          error_Wa = derivative * total_error * this_activations[0]
+          error_Wb = derivative * total_error * this_activations[1]
+          error_B  = derivative * total_error
+          error_a  = derivative * total_error * this_layer.carry_weight
+          
+          layer_errors = [error_Wa, error_Wb, error_B, error_a]
+        
+        elif type(this_layer) == LSTM:
+          if type(prev_layer) != LSTM:
+            raise SystemError(f'LSTM layer must be preceded by a LSTM layer and not {type(prev_layer)}')
+          
+          L_error   = prev_errors[0]
+          S_error   = prev_errors[1]
+          out_error = initial_gradient[this_layer_index] if this_layer.return_output else 0
+          
+          incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[this_layer_index]
+          incoming_input = LSTM_incoming_input[this_layer_index]
+          
+          ST_weights = self.layers[this_layer_index].short_term_weights
+          extra_weights = self.layers[this_layer_index].extra_weights
+          input_weights = self.layers[this_layer_index].input_weights
+          
+          total_error = out_error + S_error
+          
+          # calculate OUT
+          
+          out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
+          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
+          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
+          
+          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+          
+          # calculate OUT
+          
+          merged_D = 1 * A 
+          short_D = incoming_ST * A
+          input_D = incoming_input * A
+          
+          # calculate INPUT GATE
+          
+          B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+          C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
+          
+          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
+          
+          input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+          
+          input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+          
+          # calculate FORGET GATE
+          
+          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B 
+          short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+          
+          # calculate CARRY
+          
+          carry_ST = (ST_weights[0] * A) + \
+                     (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                     (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                     (ST_weights[3] * A)
+          
+          carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
+          
+          layer_errors = [carry_LT, carry_ST, 
+                          [merged_A, merged_B, merged_C, merged_D], 
+                          [short_A, short_B, short_C, short_D], 
+                          [input_A, input_B, input_C, input_D], 
+                          [out_a, out_b, out_we]
+                         ]
+          
+          # print(output_layer_errors)
+          # exit()
+          
+        elif type(this_layer) == GRU:
+          if type(prev_layer) != GRU:
+            raise SystemError(f'GRU layer must be preceded by a GRU layer and not {type(prev_layer)}')
+
+          carry_error = prev_errors[0]
+          out_error   = initial_gradient[this_layer_index]
+          
+          input_weights = this_layer.input_weights
+          carry_weights = this_layer.carry_weights
+          
+          total_error = out_error + carry_error
+          final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[this_layer_index]
+          
+          # output gate
+          
+          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+
+          # update gate
+          
+          error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
+                    
+          bias_B  = 1              * error_B
+          input_B = incoming_input * error_B
+          carry_B = incoming_carry * error_B
+          
+          # reset gate
+          
+          error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+
+          bias_A  = 1              * error_A
+          input_A = incoming_input * error_A
+          carry_A = incoming_carry * error_A
+          
+          # calculate upstream gradient
+          
+          carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
+                        ( carry_weights[1] * error_B                                                                                                                                                          ) + \
+                        ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
+                        ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+          
+          layer_errors = [
+                          carry_error, 
+                          [bias_A, bias_B, bias_C], 
+                          [carry_A, carry_B, carry_C], 
+                          [input_A, input_B, input_C]
+                         ]
+          
+        errors[this_layer_index] = layer_errors[:]
+
+      return errors
+    
+    def update(activations, weighted_sum, errors, learning_rate, timestep):
+
+      alpha = self.alpha
+      beta = self.beta
+      epsilon = self.epsilon
+      gamma = self.gamma
+      delta = self.delta
+
+      optimize = Key.OPTIMIZER.get(self.optimizer)
+
+      param_id = 0 # must be a positive integer
+
+      for this_layer_index in reversed(range(len(self.layers))):
+
+        layer = self.layers[this_layer_index]
+        prev_activations = activations[this_layer_index]
+        this_WS = weighted_sum[this_layer_index]
+        # this_layer_error = errors[this_layer_index]
+
+        if type(layer) == Dense and layer.learnable:
+
+          for neuron_index, neuron in enumerate(layer.neurons):
+
+            for weight_index in range(len(neuron['weights'])):
+
+              # calculate universal gradient
+              weight_gradient = 0
+
+              for error_versions in errors:
+                weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
+
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                weight_gradient /= len(errors)
+
+              # Update weights
+              param_id += 1
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+            # Updating bias
+            bias_gradient = 0
+
+            for error_versions in errors:
+              bias_gradient += error_versions[this_layer_index][neuron_index]
+
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+              bias_gradient /= len(errors)
+
+            param_id += 1
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+        elif type(layer) == Convolution and layer.learnable:
+
+          weight_gradient = arraytools.generate_array(len(layer.kernel[0]), len(layer.kernel), value=0)
+          kernel = arraytools.mirror(layer.kernel[::-1], 'Y') # flipped kernel
+          bias_gradient = 0
+
+          for error_versions in errors:
+
+            # Rows of prev_errors (0 to 1)
+            for a in range((len(prev_activations) - len(layer.kernel)) + 1):
+
+              # Columns of prev_errors (0 to 1)
+              for b in range((len(prev_activations[0]) - len(layer.kernel[0])) + 1):
+
+                # Apply the flipped kernel to the corresponding region in layer_errors
+                for kernel_row in range(len(layer.kernel)):
+
+                  for kernel_col in range(len(layer.kernel[0])):
+                    # Calculate the corresponding position in layer_errors
+
+                    conv_row = kernel_row + a
+                    conv_col = kernel_col + b
+
+                    derivative = Key.ACTIVATION_DERIVATIVE[layer.activation](this_WS[a][b])
+                    
+                    weight_gradient[kernel_row][kernel_col] += prev_activations[conv_row][conv_col] * error_versions[this_layer_index][a][b] * derivative
+
+            for row in range(len(error_versions[this_layer_index])):
+              for col in range(len(error_versions[this_layer_index][0])):
+                bias_gradient += error_versions[this_layer_index][row][col]
+
+          bias_gradient /= len(prev_activations)**2
+
+          # update kernel weights
+          for a in range(len(layer.kernel)):
+            for b in range(len(layer.kernel[a])):
+
+              param_id += 1
+
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                weight_gradient[a][b] /= len(errors)
+
+              layer.kernel[a][b] = optimize(learning_rate, layer.kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+          if layer.use_bias:
+            param_id += 1
+
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+              bias_gradient /= len(errors)
+
+            layer.bias = optimize(learning_rate, layer.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+        elif type(layer) == AFS and layer.learnable:
+
+          for this_neuron_index, _ in enumerate(layer.neurons):
+
+            # calculate weight gradient
+
+            weight_gradient = 0
+
+            for error_versions in errors:
+              weight_gradient += error_versions[this_layer_index][this_neuron_index] * prev_activations[this_neuron_index]
+
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+              weight_gradient /= len(errors)
+
+            param_id += 1
+            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+            # calculate bias gradient
+            if layer.use_bias:
+              bias_gradient = 0
+
+              for error_versions in errors:
+                bias_gradient += error_versions[this_layer_index][this_neuron_index]
+
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                bias_gradient /= len(errors)
+
+              param_id += 1
+              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+        elif type(layer) == Localunit and layer.learnable:
+
+          for neuron_index, neuron in enumerate(layer.neurons):
+
+            for weight_index in range(len(neuron['weights'])):
+
+              # calculate universal gradient
+              weight_gradient = 0
+
+              for error_versions in errors:
+                weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
+
+              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+                weight_gradient /= len(errors)
+
+              # Update weights
+              param_id += 1
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+            # Updating bias
+
+            bias_gradient = 0
+
+            for error_versions in errors:
+              bias_gradient += error_versions[this_layer_index][neuron_index]
+
+            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+              bias_gradient /= len(errors)
+
+            param_id += 1
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+        elif type(layer) == Recurrent and layer.learnable:
+          Wa_gradient = 0
+          Wb_gradient = 0
+          B_gradient  = 0
+          
+          for error_version in errors:
+            Wa_gradient += error_version[this_layer_index][0]
+            Wb_gradient += error_version[this_layer_index][1]
+            B_gradient  += error_version[this_layer_index][2]
+
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+            Wa_gradient /= len(errors)
+            Wb_gradient /= len(errors)
+            B_gradient  /= len(errors)
+
+          param_id += 1
+          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          param_id += 1
+          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          param_id += 1
+          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        
+        elif type(layer) == LSTM and layer.learnable:
+          
+          B_ERR     = [0] * 4 # biases (merge)
+          ST_ERR    = [0] * 4 # short term weights
+          INPUT_ERR = [0] * 4 # input weights
+          EXTRA_ERR = [0] * 3 # extra weights (output gate)
+          
+          for error_version in errors:
+            B_ERR     = [B_ERR[i]     + error_version[this_layer_index][2][i] for i in range(4)]
+            ST_ERR    = [ST_ERR[i]    + error_version[this_layer_index][3][i] for i in range(4)]
+            INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][4][i] for i in range(4)]
+            EXTRA_ERR = [EXTRA_ERR[i] + error_version[this_layer_index][5][i] for i in range(3)]
+            
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+            B_ERR     = [a / len(errors) for a in B_ERR]
+            ST_ERR    = [b / len(errors) for b in ST_ERR]
+            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+            EXTRA_ERR = [d / len(errors) for d in EXTRA_ERR]
+          
+          for index, bias in enumerate(layer.biases):
+            param_id += 1
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          
+          for index, weight in enumerate(layer.short_term_weights):
+            param_id += 1
+            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          
+          for index, weight in enumerate(layer.input_weights):
+            param_id += 1
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          
+          for index, weight in enumerate(layer.extra_weights):
+            param_id += 1
+            if layer.version == 'statquest':
+              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        
+        elif type(layer) == GRU and layer.learnable:
+          
+          B_ERR     = [0] * 3 # biases
+          C_ERR     = [0] * 3 # short term weights
+          INPUT_ERR = [0] * 3 # input weights
+          
+          for error_version in errors:
+            B_ERR     = [B_ERR[i]     + error_version[this_layer_index][1][i] for i in range(3)]
+            C_ERR     = [C_ERR[i]     + error_version[this_layer_index][2][i] for i in range(3)]
+            INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][3][i] for i in range(3)]
+            
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+            B_ERR     = [a / len(errors) for a in B_ERR]
+            C_ERR     = [b / len(errors) for b in C_ERR]
+            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+          
+          for index, bias in enumerate(layer.biases):
+            param_id += 1
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+          for index, weight in enumerate(layer.carry_weights):
+            param_id += 1
+            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+          for index, weight in enumerate(layer.input_weights):
+            param_id += 1
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          
+    #################################################################################################
+    #                                     Automatic Fitting                                         #
+    #################################################################################################
+    
+    self.is_trained = True
+
+    # variables
+    learning_rate = self.learning_rate
+    epochs = self.epochs + 1
+
+    verbose = kwargs.get('verbose', 0)
+    regularity = kwargs.get('regularity', 1)
+
+    if True: # Error Prevention
+
+      # Function args - error prevention
+      if not type(features) in (list, tuple):
+        raise TypeError("features must be a list")
+      if not type(targets) in (list, tuple):
+        raise TypeError("targets must be a list")
+      if len(features) == 0 or len(targets) == 0:
+        raise ValueError("features or targets must not be empty")
+      if len(features[0]) == 0 or len(targets[0]) == 0:
+        raise ValueError("feature or target must not be empty")
+
+    # neural network fitting
+    x = features[0]
+    sizes = [arraytools.shape(x)]
+    calibrate_dense = False
+    calibrate_afs = False
+    calibrate_localunit = False
+    calibrate_operation = False
+    
+    timestep = 1
+    
+    # calibration and structure intialization
+    for _ in range(2):
+      
+      x = features[0]
+      
+      for layer_index, layer in enumerate(self.layers):
+
+        if type(layer) == Maxpooling:
+          x = layer.apply(x)
+          sizes.append(arraytools.shape(x))
+
+        elif type(layer) == Meanpooling:
+          x = layer.apply(x)
+          sizes.append(arraytools.shape(x))
+
+        elif type(layer) == Convolution:
+          x = layer.apply(x)
+          sizes.append(arraytools.shape(x))
+
+        elif type(layer) == Flatten:
+          x = layer.apply(x)
+          layer.set_length(len(x))
+          sizes.append(arraytools.shape(x))
+
+        elif type(layer) == Reshape:
+          x = layer.apply(x)
+          sizes.append(arraytools.shape(x))
+
+        elif type(layer) == AFS:
+
+          if not calibrate_afs:
+            
+            if layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), (1,1))
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), (1,1))
+            
+            x = layer.apply(x)
+            sizes.append(arraytools.shape(x))
+          
+          else:
+            
+            if layer_index == len(self.layers) - 1: # last
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+            
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
+
+        elif type(layer) == Dense:
+          if not calibrate_dense:
+            
+            if layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), (1,1))
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), (1,1))
+            
+            x = layer.apply(x)
+            sizes.append(arraytools.shape(x))
+          
+          else:
+            
+            if layer_index == len(self.layers) - 1: # last
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+              
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
+          
+        elif type(layer) == Operation:
+
+          if not calibrate_operation:
+            
+            if layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), (1,1))
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), (1,1))
+            
+            x = layer.apply(x)
+            sizes.append(arraytools.shape(x))
+          
+          else:
+            
+            if layer_index == len(self.layers) - 1: # last
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+            
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
+
+        elif type(layer) == Localunit:
+
+          if not calibrate_localunit:
+            
+            if layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), (1,1))
+
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), (1,1))
+            
+            x = layer.apply(x)
+            sizes.append(arraytools.shape(x))
+          
+          else:
+            
+            if layer_index == len(self.layers) - 1: # last
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index])
+
+            elif layer_index == 0: # first layer
+              layer.reshape_input_shape(len(features[0]), sizes[layer_index+1])
+            
+            else: # every other layer
+              layer.reshape_input_shape(len(self.layers[layer_index-1].neurons), sizes[layer_index+1])
+
+      calibrate_dense = True
+      calibrate_afs = True
+      calibrate_localunit = True
+      calibrate_operation = True
+      
+      self.sizes = sizes
+    
+    self.RNN  = any(type(layer) == Recurrent for layer in self.layers)
+    self.LSTM = any(type(layer) == LSTM for layer in self.layers)
+    self.GRU  = any(type(layer) == GRU for layer in self.layers)
+    self.mLSTM = any(type(layer) == mLSTM for layer in self.layers)
+    self.sLSTM = any(type(layer) == sLSTM for layer in self.layers)
+    
+    # main training loop - iterate over the epochs
+    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if verbose==1 else range(epochs):
+      epoch_loss = 0
+      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)})%", decimals=2, length=70, empty=' ') if verbose==2 else range(0, len(features), self.batchsize):
+        errors = []
+
+        for batch_index in range(self.batchsize):
+
+          if base_index + batch_index >= len(features):
+            continue
+
+          activations, weighted_sums = Propagate(features[base_index + batch_index])
+          
+          if self.RNN or self.LSTM or self.GRU:
+            
+            skibidi = 0
+            target = []
+            
+            for layer in self.layers:
+              if layer.return_output == False:
+                target.append(0)
+              else:
+                if skibidi >= len(targets[base_index + batch_index]):
+                  raise IndexError("not enough elements in the targets to verify")
+                target.append(targets[base_index + batch_index][skibidi])
+                skibidi += 1
+          
+          else:
+            target = targets[base_index + batch_index]
+          
+          errors.append(Backpropagate(activations, weighted_sums, target))
+
+          if self.RNN or self.LSTM or self.GRU:
+            predicted = self.push(features[base_index + batch_index])
+
+          else:
+            predicted = activations[-1]
+            target = targets[base_index + batch_index]
+          
+          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], predicted)
+        
+        timestep += 1
+        
+        if 'frozenTS' in self.experimental:
+          timestep = 1
+        
+        update(activations, weighted_sums, errors, learning_rate, timestep)
+        errors = []
+
+      self.error_logs.append(epoch_loss)
+
+      if epoch % regularity == 0 and verbose>=3:
+        prefix = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%) "
+        suffix = f"| Loss: {str(epoch_loss):25} |"
+
+        rate = f" ROC: {epoch_loss - self.error_logs[epoch-1] if epoch > 0 else 0}"
+
+        pad = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%) ") - len(prefix))
+        print(prefix + pad + suffix + rate if verbose == 4 else prefix + pad + suffix)
+
+  # post-processing
+
+  def push(self, x):
+    """
+    Args
+    -----
+    x (list) : the input to the model
+    """
+
+    if self.RNN:
+
+      output = 0      
+      input_index = 0
+      answer = []
+      
+      for layer in self.layers:
+
+        if layer.accept_input:
+          output = layer.apply(x[input_index], output)
+          input_index += 1
+          
+        else:
+          output = layer.apply(0, output)
+
+        if layer.return_output:
+          answer.append(output)
+      
+      return answer
+      
+    elif self.LSTM:
+      
+      long_term = 0
+      short_term = 0
+      input_index = 0
+      answer = []
+      
+      for layer in self.layers:
+
+        if layer.accept_input:
+          long_term, short_term = layer.apply(x[input_index], long_term, short_term)
+          input_index += 1
+          
+        else:
+          long_term, short_term = layer.apply(0, long_term, short_term)
+
+        if layer.return_output:
+          answer.append(short_term)
+      
+      return answer
+    
+    elif self.GRU:
+      
+      output = 0
+      input_index = 0
+      answer = []
+      
+      for layer in self.layers:
+
+        if layer.accept_input:
+          output = layer.apply(x[input_index], output)
+          input_index += 1
+          
+        else:
+          output = layer.apply(0, output)
+
+        if layer.return_output:
+          answer.append(output)
+      
+      return answer
+    
+    else:
+    
+      for layer in self.layers:
+
+        if type(layer) == Convolution:
+          x = layer.apply(x)
+
+        elif type(layer) == Dense:
+          x = layer.apply(x)
+
+        elif type(layer) == Maxpooling:
+          x = layer.apply(x)
+
+        elif type(layer) == Meanpooling:
+          x = layer.apply(x)
+
+        elif type(layer) == Flatten:
+          x = layer.apply(x)
+
+        elif type(layer) == Reshape:
+          x = layer.apply(x)
+
+        elif type(layer) == AFS:
+          x = layer.apply(x)
+
+        elif type(layer) == Operation:
+          x = layer.apply(x)
+
+        elif type(layer) == Localunit:
+          x = layer.apply(x)
+
+        else:
+          raise TypeError(f"Unknown layer type {type(layer)}")
+
+      return x
+
+#######################################################################################################
+#                                         Component Classes                                           #
 #######################################################################################################
 
 # neural layers
@@ -2132,43 +3768,50 @@ class Recurrent:
   
   def apply(self, input, carry):
     
-    return [Key.ACTIVATION[self.activation]((input * self.input_weight) + (carry * self.carry_weight) + self.bias)] * 2
+    return Key.ACTIVATION[self.activation]((input * self.input_weight) + (carry * self.carry_weight) + self.bias)
 
   def get_weighted_sum(self, input, carry):
     
-    return [(input * self.input_weight) + (carry * self.carry_weight) + self.bias] * 2
+    return (input * self.input_weight) + (carry * self.carry_weight) + self.bias
 
 class LSTM:
   def __init__(self, **kwargs):
     """
     Long Short Term Memory (LSTM)
     -----
-      Primary block within RNNs (Recurrent Neural Networks). it is only compatible with other LSTMs.
-      it is not copatible with Gated Recurrent Unit (GRU) or Recurrent Unit (RNN).
+      Simmilar to the recurrent unit, but it has a long term memory and this, it is only compatible with other LSTMs.
+      it is not copatible with Gated Recurrent Unit (GRU) or Recurrent Unit (RNN) since they only have 1 state.
     -----
     Args
     -----
-    - activation           (string)  : the activation function to use for the attention layer
+    - (Optional) version   (boolean) : alters the version of the LSTM, 'Statquest' by default
     - (Optional) input     (boolean) : accept an input during propagation, on by default
     - (Optional) output    (boolean) : return anything during propagation, on by default
     - (Optional) learnable (boolean) : whether or not to learn, on by default
     - (Optional) name      (string)  : the name of the layer
+    -----
+      Versions
+    -----
+      - Standard (default) : the standard LSTM, the output is not scaled and thus, have a range of -1 to 1
+      - Statquest : an LSTM architechture that is proposed by Statquest, it scales the 
+                    output by independent weights, allowing it to have a range of -infinity to infinity
     """
     
-    self.name = kwargs.get('name', 'recurrent')
+    self.name = kwargs.get('name', 'LSTM')
     self.accept_input = kwargs.get('input', True)
     self.return_output = kwargs.get('output', True)
     self.learnable = kwargs.get('learnable', True)
+    self.version = kwargs.get('version', 'standard').lower()
     
-    STW_RANGE  = 1.22
-    INP_RANGE  = 1.73
+    STW_RANGE  = 1.0
+    INP_RANGE  = 1
     BIAS_RANGE = 0
-    EXW_RANGE  = 1.22
+    EXW_RANGE  = 1.0
     
     self.short_term_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 4
     self.input_weights      = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 4
     self.biases             = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 4
-    self.extra_weights      = [random.uniform(-EXW_RANGE,  EXW_RANGE) ] * 3
+    self.extra_weights      = [random.uniform(-EXW_RANGE,  EXW_RANGE) ] * 3 if self.version == 'statquest' else [1, 1, 1]
   
   def apply(self, input, long_term, short_term):
     
@@ -2211,7 +3854,85 @@ class LSTM:
     # return the final long term and short term states
     return long_term, short_term, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term
   
-class GRU: # unimplimented
+class GRU:
+  def __init__(self, **kwargs):
+    """
+    Gated Recurrent Unit (GRU)
+    -----
+      Simmilar to recurrent units, just more intricate and thus, is also compatible with the recurrent unit.
+      it is not copatible with Long Short Term Memory (LSTM) cells.
+      
+      unlike other recurrent units, GRU cells output a range from -1 to 1
+    -----
+    Args
+    -----
+    - activation           (string)  : the activation function to use for the attention layer
+    - (Optional) input     (boolean) : accept an input during propagation, on by default
+    - (Optional) output    (boolean) : return anything during propagation, on by default
+    - (Optional) learnable (boolean) : whether or not to learn, on by default
+    - (Optional) name      (string)  : the name of the layer
+    """
+    
+    self.name = kwargs.get('name', 'recurrent')
+    self.accept_input = kwargs.get('input', True)
+    self.return_output = kwargs.get('output', True)
+    self.learnable = kwargs.get('learnable', True)
+    
+    STW_RANGE  = 1.0
+    INP_RANGE  = 0.75
+    BIAS_RANGE = 0
+    
+    self.carry_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 3
+    self.input_weights = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 3
+    self.biases        = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 3
+
+  def apply(self, input, carry):
+    
+    # merging the input and carry states
+    
+    weighted_input = [input * self.input_weights[i] for i in range(3)]
+    weighted_carry = [carry * self.carry_weights[i] for i in range(2)]
+    merged_state = [weighted_input[i] + weighted_carry[i] + self.biases[i] for i in range(2)]
+    
+    # calculating the final merged state
+    weighted_carry.append(Key.ACTIVATION["sigmoid"](merged_state[0]) * carry * self.carry_weights[2])
+    merged_state.append(weighted_input[2] + weighted_carry[2] + self.biases[2])
+    
+    # processes
+    
+    gated_carry = Key.ACTIVATION["sigmoid"](merged_state[1]) * carry
+    
+    final_output = Key.ACTIVATION["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) + gated_carry
+    
+    return final_output
+
+  def get_weighted_sum(self, input, carry):
+    # merging the input and carry states
+    
+    weighted_input = [input * self.input_weights[i] for i in range(3)]
+    weighted_carry = [carry * self.carry_weights[i] for i in range(2)]
+    merged_state = [weighted_input[i] + weighted_carry[i] + self.biases[i] for i in range(2)]
+    
+    # calculating the final merged state
+    weighted_carry.append(Key.ACTIVATION["sigmoid"](merged_state[0]) * carry * self.carry_weights[2])
+    merged_state.append(weighted_input[2] + weighted_carry[2] + self.biases[2])
+    
+    # processes
+    
+    gated_carry = Key.ACTIVATION["sigmoid"](merged_state[1]) * carry
+    
+    final_output = Key.ACTIVATION["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) + gated_carry
+    
+    return final_output, gated_carry, merged_state, weighted_input, weighted_carry, input, carry
+  
+class mLSTM: # unimplimented
+  # maybe impliment this sometime in the future when there is a reason to (even if it is just for fun)
+  # but as for right now, its just here as a reminder. refrence at https://www.mdpi.com/2673-2688/5/3/71
+  ...
+  
+class sLSTM: # unimplimented
+  # maybe impliment this sometime in the future when there is a reason to (even if it is just for fun)
+  # but as for right now, its just here as a reminder. refrence at https://www.mdpi.com/2673-2688/5/3/71
   ...
 
 # Functional layers

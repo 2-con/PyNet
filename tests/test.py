@@ -3,18 +3,15 @@ import os
 
 # Get the directory of the current script (test.py)
 current_script_dir = os.path.dirname(__file__)
-
-# Navigate up one level to the 'PyNet' directory
-# If test.py is in PyNet/tests/, then '..' takes us to PyNet/
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
-
-# Add the PyNet root directory to Python's module search path
 sys.path.append(pynet_root_dir)
+
 import api.synapse as ai
 
 import tools.arraytools as tools
 import tools.visual as visual
 from tools.arraytools import generate_random_array
+import matplotlib.pyplot as plt
 
 test = 4
 
@@ -84,11 +81,11 @@ elif test == 2: # NN
   )
 
   model.compile(
-    optimizer='default', 
+    optimizer='adam', 
     loss='mean squared error', 
-    learning_rate=0.1, 
+    learning_rate=0.01,
     batch_size=1,
-    epochs=1000, 
+    epochs=10000, 
     metrics=['accuracy']
   ) 
 
@@ -99,65 +96,78 @@ elif test == 2: # NN
   
 elif test == 3: # RNN
   training_features = [
-    [2,3,4,5], 
-    [0,1,2,3], 
-    [4,5,6,7], 
-    [-2,-1,0,1]
-    ]
-  training_target   = [
+    
+    [1, 2, 3, 4],   # 10
+    [0, 1, 2, 3],   # 6
+    [5, 5, 0, 0],   # 10
+    [1, 1, 1, 1],   # 4
+    [2, 2, 1, 2]    # 7
+  ]
+
+  training_target = [
+    [10],
     [6],
+    [10],
     [4],
-    [8],
-    [2]]
+    [7]
+  ]
 
   model = ai.Sequential(
     ai.Recurrent('none', input=True, output=False),
     ai.Recurrent('none', input=True, output=False),
     ai.Recurrent('none', input=True, output=False),
-    ai.Recurrent('none', input=True, output=True),
+    ai.Recurrent('none', input=True, output=False),
+    ai.Recurrent('none', input=False, output=True),
   )
   
   model.compile(
-    optimizer='default', 
+    optimizer='rmsprop', 
     loss='mean squared error', 
-    learning_rate=0.02,
-    batch_size=1, 
-    epochs=10000,
+    learning_rate=0.00001,
+    batch_size=3, 
+    epochs=300000,
     metrics=['accuracy']
   ) 
   
-  model.fit(training_features, training_target, regularity=1, verbose=4)
+  model.fit(training_features, training_target, regularity=100, verbose=4)
   
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
     
-  print(f"{model.push([8,9,10,11])} true [12]")
+  print(f"{model.push([5,5,5,5])} true [20]")
 
 elif test == 4: # LSTM
   training_features = [
-    [1, 2, 3, 4],
-    [0, 1, 2, 3],
-    [-1, 0, 1, 2],
-    ]
-  training_target   = [
-    [5],
-    [4],
-    [3]
-    ]
+    
+    [1, 2, 3, 4],   # 10
+    [0, 1, 2, 3],   # 6
+    [5, 5, 0, 0],   # 10
+    [1, 1, 1, 1],   # 4
+    [2, 2, 1, 2]    # 7
+  ]
+
+  training_target = [
+    [1],
+    [-1/3],
+    [1],
+    [-1],
+    [0]
+  ]
 
   model = ai.Sequential(
-    ai.LSTM(output = False),
-    ai.LSTM(output = False),
-    ai.LSTM(output = False),
-    ai.LSTM(output = True)
+    ai.LSTM(input=True, output = False),
+    ai.LSTM(input=True, output = False),
+    ai.LSTM(input=True, output = False),
+    ai.LSTM(input=True, output = False),
+    ai.LSTM(input=False, output = True),
   )
   
   model.compile(
-    optimizer='adam', 
+    optimizer='rmsprop', 
     loss='mean squared error', 
-    learning_rate=0.001,
-    batch_size=1, 
-    epochs=20000,
+    learning_rate=0.0001,
+    batch_size=3, 
+    epochs=50000,
     metrics=['accuracy']
   ) 
   
@@ -167,6 +177,57 @@ elif test == 4: # LSTM
     regularity=100, 
     verbose=4
     )
-  
+   
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
+
+elif test == 5: # GRU
+  training_features = [
+    
+    [1, 2, 3, 4],   # 10
+    [0, 1, 2, 3],   # 6
+    [5, 5, 0, 0],   # 10
+    [1, 1, 1, 1],   # 4
+    [2, 2, 1, 2]    # 7
+  ]
+
+  training_target = [
+    [1],
+    [-1/3],
+    [1],
+    [-1],
+    [0]
+  ]
+
+  model = ai.Sequential(
+    ai.GRU(input=True, output = False),
+    ai.GRU(input=True, output = False),
+    ai.GRU(input=True, output = False),
+    ai.GRU(input=True, output = False),
+    ai.GRU(input=False, output = True),
+  )
+  
+  model.compile(
+    optimizer='adam', 
+    loss='mean squared error', 
+    learning_rate=0.001,
+    batch_size=1, 
+    epochs=50000,
+    metrics=['accuracy']
+  )  
+  
+  model.fit(
+    training_features, 
+    training_target, 
+    regularity=100, 
+    verbose=4
+    )
+   
+  for feature, target in zip(training_features, training_target):
+    print(f"pred {model.push(feature)} true {target}")
+
+plt.plot(range(len(model.error_logs)), model.error_logs)
+plt.title("Model Loss vs Epoch")
+plt.xlabel("Epoch")
+plt.ylabel(f" {model.loss} Loss")
+plt.show()
