@@ -6,7 +6,7 @@ A collection of tools for working with arrays, mainly 1D and 2D arrays
   
 import random
 
-def convolve2d(matrix, kernel):
+def convolve(matrix, kernel):
     """
     Convolve a 2D matrix with a 2D kernel.
     
@@ -142,33 +142,101 @@ def transpose(input):
 
   return answer
 
-def array_equal(input1, input2):
+def concat(*input):
   """
-  Array equality
+  Concatenate
   -----
-    Compares if two 2D arrays are the same dimentions
+    Concatenates any number of 1D/2D arrays horizontally.
   -----
   Args
   -----
-  input1 (2D array) : the first array
-  input2 (2D array) : the second array
-  
-  Returns
-  -----
-    Bool
+    input (2D array) : the array to transpose
   """
-  if len(input1) != len(input2):
-    return False
+  answer = []
+  
+  if len(shape(input[0])) > 1:
+    
+    for index, image in enumerate(input):
+      
+      if shape(image) != shape(input[0]):
+        raise ValueError(f"All tensors must be the same shape, tensor {index} has shape {shape(image)} while tensor 0 has shape {shape(input[0])}")
+      
+      answer += transpose(image)
+    
+    return transpose(answer)
 
-  for i in range(len(input1)):
-    if len(input1[i]) != len(input2[i]):
-      return False
+  else:
+    
+    for vect in input:
+      answer += vect
+      
+    return answer
 
-    for j in range(len(input1[i])):
-      if input1[i][j] != input2[i][j]:
-        return False
+def total(*args):
+  """
+  Pointwise summation
+  -----
+    Pointwise summation of any number of 1D/2D arrays
+  -----
+  Args
+  -----
+    input (2D array) : the array to transpose
+  """
+  arrays = list(args)
+  
+  if not arrays:
+    raise ValueError("Input list of arrays cannot be empty.")
 
-  return True
+  def _get_shape(arr):
+    if arr is None:
+      return (0,)
+    if not isinstance(arr, (list, tuple)):
+      return () # Scalar
+    if not arr:
+      return (0,) # Empty list/tuple at this level
+    
+    current_dim_size = len(arr)
+    sub_shape = _get_shape(arr[0])
+    return (current_dim_size,) + sub_shape
+
+  # 1. Get the shape of the first array and validate all input arrays
+  #    have the same shape.
+  first_array_shape = _get_shape(arrays[0])
+
+  if not first_array_shape: # Check if the first 'array' is actually a scalar or empty
+    raise ValueError("Input arrays must be 1D or 2D lists/tuples, not scalars or empty.")
+  
+  if len(first_array_shape) > 2:
+      raise ValueError("This function is designed for 1D or 2D arrays only.")
+  
+  # Initialize the result array with zeros (or the first array's values)
+  # based on the determined shape.
+  if len(first_array_shape) == 1: # 1D array
+    result = [0] * first_array_shape[0]
+  elif len(first_array_shape) == 2: # 2D array
+    rows, cols = first_array_shape
+    result = [[0 for _ in range(cols)] for _ in range(rows)]
+  else:
+    # just in case there is more funny shapes.
+    raise ValueError("Unexpected array dimension. Only 1D and 2D supported.")
+
+  # 2. Perform pointwise addition
+  for i, arr in enumerate(arrays):
+    current_array_shape = _get_shape(arr)
+    if current_array_shape != first_array_shape:
+      raise ValueError(f"Array at index {i} has shape {current_array_shape}, "
+                       f"but expected shape {first_array_shape}. All arrays must have the same shape.")
+
+    if len(first_array_shape) == 1: # 1D addition
+      for j in range(first_array_shape[0]):
+        result[j] += arr[j]
+    elif len(first_array_shape) == 2: # 2D addition
+      rows, cols = first_array_shape
+      for r in range(rows):
+        for c in range(cols):
+          result[r][c] += arr[r][c]
+
+  return result
 
 def generate_array(*args, **kwargs):
   """
@@ -250,43 +318,28 @@ def shape(input):
   -----
   (X size, Y size)
   """
-  rows = 0
-  pixel = 0
+  def recursive(input_tensor):
+    if input_tensor is None:
+      return (0,)
+
+    if not isinstance(input_tensor, (list, tuple)):
+      return ()
+
+    if not input_tensor:
+      return (0,) # An empty dimension
+
+    # Get the size of the current dimension
+    current_dimension_size = len(input_tensor)
+
+    sub_shape = shape(input_tensor[0])
+
+    # Combine the current dimension's size with the sub-shape
+    return sub_shape + (current_dimension_size,)
 
   if input == None:
-    return 0,0
+    return None
 
-  if type(input) not in (list, tuple):
-    return 1,1
-
-  if type(input[0]) not in (list, tuple):
-    return len(input), 1
-
-  return len(input[0]), len(input)
-
-def flip(input, axis = 'X'):
-  """
-  Flip
-  -----
-    Flips a 2D array along the X or Y axis
-  -----
-  Args
-  -----
-  input (2D array) : the array to flip
-  axis (string) : the axis to flip the array along ('X' or 'Y')
-  
-  Returns
-  -----
-    2D array
-  """
-  if axis == 'X':
-    return [row[::-1] for row in input]
-
-  elif axis == 'Y':
-    return input[::-1]
-
-  else:
-    raise ValueError("axis must be 'X' or 'Y'")
+  return recursive(input)
 
 def size(input):
   """

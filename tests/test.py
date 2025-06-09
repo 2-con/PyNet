@@ -13,7 +13,7 @@ import tools.visual as visual
 from tools.arraytools import generate_random_array
 import matplotlib.pyplot as plt
 
-test = 4
+test = 6
 
 if test == 1: # CNN
 
@@ -48,7 +48,7 @@ if test == 1: # CNN
   
   model = ai.Sequential( 
     
-    ai.Convolution( kernel=generate_random_array(2,2), activation='none', bias=True, learnable=True ),
+    ai.Convolution( kernel=generate_random_array(2,2), activation='relu', bias=True, learnable=True ),
     ai.Flatten(),
   )
 
@@ -63,7 +63,7 @@ if test == 1: # CNN
   model.fit(
     trainX, 
     trainY, 
-    regularity=1, 
+    regularity=1000, 
     verbose=4
   )
 
@@ -81,12 +81,12 @@ elif test == 2: # NN
   )
 
   model.compile(
-    optimizer='adam', 
+    optimizer='none', 
     loss='mean squared error', 
     learning_rate=0.01,
     batch_size=1,
     epochs=10000, 
-    metrics=['accuracy']
+    metrics=['accuracy'],
   ) 
 
   model.fit(training_features, training_target, regularity=100, verbose=4)
@@ -225,6 +225,41 @@ elif test == 5: # GRU
    
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
+
+elif test == 6: # Paralellization test
+  
+  training_features = [
+    
+    [1, 9]
+  ]
+
+  training_target = [
+    [1,1,1,1]
+  ]
+  
+  model = ai.Sequential( 
+    
+    ai.Dense(2, activation='elu'),
+    ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(2, activation='elu') ),
+    # ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
+    ai.Merge('concat'),
+    ai.Dense(4, activation='elu'),
+  )
+
+  model.compile(
+    optimizer='default', 
+    loss='mean squared error', 
+    learning_rate=0.1, 
+    epochs=10000,
+    metrics=['accuracy']
+  )
+  
+  model.fit(
+    training_features, 
+    training_target, 
+    regularity=1, 
+    verbose=4
+  )
 
 plt.plot(range(len(model.error_logs)), model.error_logs)
 plt.title("Model Loss vs Epoch")
