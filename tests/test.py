@@ -234,23 +234,24 @@ elif test == 6: # Paralellization test
   ]
 
   training_target = [
-    [1,1,1,1]
+    [1,1]
   ]
   
   model = ai.Sequential( 
     
     ai.Dense(2, activation='elu'),
-    ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(2, activation='elu') ),
-    # ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
+    # ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(2, activation='elu') ),
+    ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
     ai.Merge('concat'),
-    ai.Dense(4, activation='elu'),
+    ai.Dense(2, activation='elu'),
   )
 
   model.compile(
     optimizer='default', 
     loss='mean squared error', 
-    learning_rate=0.1, 
-    epochs=10000,
+    learning_rate=0.1,
+    batch_size=1,
+    epochs=5000,
     metrics=['accuracy']
   )
   
@@ -260,6 +261,9 @@ elif test == 6: # Paralellization test
     regularity=1, 
     verbose=4
   )
+  
+  for feature, target in zip(training_features, training_target):
+    print(f"pred {model.push(feature)} true {target}")
 
 plt.plot(range(len(model.error_logs)), model.error_logs)
 plt.title("Model Loss vs Epoch")

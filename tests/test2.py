@@ -14,6 +14,8 @@ sys.path.append(pynet_root_dir)
 from tools import arraytools
 from tools.visual import numerical_display
 
+onedim = [1,2,3]
+
 twodim = [
   [1,2,3],
   [4,5,6],
@@ -47,11 +49,13 @@ threedim = [
   ]
 ]
 
-print(f""" 
-    None  {arraytools.shape(None)}
-       1  {arraytools.shape(1)}
- [1,2,3]  {arraytools.shape([1,2,3])}
-  twodim  {arraytools.shape(twodim)}
-     bar  {arraytools.shape(bar)}
-threedim  {arraytools.shape(threedim)}
-""")
+
+
+# print(f""" 
+#     None  {arraytools.shape(None)}
+#        1  {arraytools.shape(1)}
+#  [1,2,3]  {arraytools.shape([1,2,3])}
+#   twodim  {arraytools.shape(twodim)}
+#      bar  {arraytools.shape(bar)}
+# threedim  {arraytools.shape(threedim)}
+# """)
