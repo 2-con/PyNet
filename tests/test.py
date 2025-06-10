@@ -230,35 +230,42 @@ elif test == 6: # Paralellization test
   
   training_features = [
     
-    [1, 9]
+    [
+      [1, 1, 1],
+      [1, 1, 1],
+      [1, 1, 1]
+    ]
   ]
 
   training_target = [
-    [1,1]
+    [1, 1]
   ]
   
   model = ai.Sequential( 
     
-    ai.Dense(2, activation='elu'),
-    # ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(2, activation='elu') ),
-    ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
+    # ai.Dense(2, activation='elu'),
+    ai.Parallel( ai.Convolution((2,2), activation='elu'), ai.Convolution((2,2), activation='elu') ),
+    # ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(3, activation='elu') ),
+    # ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
     ai.Merge('concat'),
+    ai.Convolution((2,2), activation='elu'),
+    ai.Flatten(),
     ai.Dense(2, activation='elu'),
   )
 
   model.compile(
-    optimizer='default', 
+    optimizer='adam', 
     loss='mean squared error', 
-    learning_rate=0.1,
+    learning_rate=0.01,
     batch_size=1,
-    epochs=5000,
+    epochs=1000,
     metrics=['accuracy']
   )
   
   model.fit(
     training_features, 
     training_target, 
-    regularity=1, 
+    regularity=100, 
     verbose=4
   )
   

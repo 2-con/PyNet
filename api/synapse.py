@@ -798,10 +798,12 @@ class Sequential:
           
           # output gate
           
-          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-
+          error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          
+          bias_C  = 1                                                             * error_C
+          input_C = incoming_input                                                * error_C
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
+          
           # update gate
           
           error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
@@ -896,8 +898,41 @@ class Sequential:
                 layer_errors = prev_errors
               
               else:
+                
+                layer_errors = [0] * len(this_layer.neurons)
+                
+                if type(prev_layer.branches[0]) == Dense:
+                  for branch_index, branch in enumerate(prev_layer.branches):
+                    
+                    for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
+                      
+                      neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+                    layer_errors[this_neuron_index] += derivative * sum(neuron_error)
+                
+                elif type(prev_layer.branches[0]) == AFS:
+                  for branch_index, branch in enumerate(prev_layer.branches):
+                    layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] * branch.neurons[this_neuron_index]['weight']
+                
+                elif type(prev_layer.branches[0]) == Operation:
+                  for branch_index, branch in enumerate(prev_layer.branches):
+                    layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] 
+                    
+                elif type(prev_layer.branches[0]) == Localunit:
+                  for branch_index, branch in enumerate(prev_layer.branches):
+                    
+                    for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
+
+                      if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                        neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+                    layer_errors[this_neuron_index] += derivative * sum(neuron_error)
+                
+                else:
+                  raise TypeError("Parallel 2D image processing on a 1D input is abiguous. consider reshaping the layer to 2D.")
+                
                 # pointwise summation of all errors since the input is distributed equally
-                layer_errors = arraytools.total(*prev_errors)
+                # layer_errors = arraytools.total(*prev_errors)
             
             elif type(prev_layer) == Merge:
               layer_errors.append( derivative * prev_errors[this_neuron_index] )
@@ -908,7 +943,6 @@ class Sequential:
             kernel = arraytools.mirror(this_layer.kernel[:], 'X')
           else:
             kernel = this_layer.kernel[:]
-          
 
           layer_errors = arraytools.generate_array(value=0, *this_layer.input_shape)
 
@@ -958,6 +992,10 @@ class Sequential:
           sizex, sizey = this_layer.input_shape
 
           layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
+          
+          # force into a 2D array
+          if len(arraytools.shape(layer_errors)) == 1:
+            layer_errors = [layer_errors]
 
         elif type(this_layer) == Reshape:
 
@@ -1100,6 +1138,8 @@ class Sequential:
 
               layer_errors.append( prev_errors[this_neuron_index] )
 
+        # recurrent layers
+        
         elif type(this_layer) == Recurrent:
           if type(prev_layer) != Recurrent:
             raise SystemError(f'Recurrent layer must be preceded by a Recurrent layer and not {type(prev_layer)}')
@@ -1204,10 +1244,12 @@ class Sequential:
           
           # output gate
           
-          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-
+          error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          
+          bias_C  = 1                                                             * error_C
+          input_C = incoming_input                                                * error_C
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
+          
           # update gate
           
           error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
@@ -1238,6 +1280,8 @@ class Sequential:
                           [input_A, input_B, input_C]
                          ]
         
+        # Parallel layers
+        
         elif type(this_layer) == Parallel:
           
           if type(prev_layer) == Parallel:
@@ -1254,6 +1298,7 @@ class Sequential:
             
           # if it contains other stuff, then split the incoming error appropriately
           else:
+            
             # seperate the error into components to be processed
             if type(prev_layer) == Merge:
               if prev_layer.merge_type == 'total':
@@ -1267,28 +1312,27 @@ class Sequential:
                 if len(arraytools.shape(prev_errors)) == 2:
                   
                   components = []
-                  input_shape_indexer = 0
-                  # counts from the start to the end, skipping by the number of branches
-                  # to properly delegate errors
-                  for base in range(0, arraytools.shape(prev_errors)[0], prev_layer.input_shapes[input_shape_indexer][0]):
-                    component = []
-                    for row in range(len(prev_errors)):
-                      component.append(prev_errors[row][base:base+len(this_layer.branches)])
-                    components.append(component)
-                    input_shape_indexer += 1
                   
+                  for length in prev_layer.input_shapes:
+                    component = []
+                    
+                    for row in prev_errors:
+                      component.append(row[:length[0]])
+                      row = row[length[0]:]
+                    
+                    components.append(component)
+                    
                 else:
                   components = []
                   
-                  for base in range(0, arraytools.shape(prev_errors)[0], len(this_layer.branches)):
-                    components.append(prev_errors[base:base+len(this_layer.branches)])
+                  for length in prev_layer.input_shapes:
+                    components.append(prev_errors[:length[0]])
+                    prev_errors = prev_errors[length[0]:]
                   
                 prev_errors = components[:]
                 
               else:
                 raise SystemError(f'Unknown merging policy: {prev_layer.merge_type}')
-
-              
               
               layer_errors = prev_errors
             
@@ -2267,6 +2311,13 @@ class Parallel:
           
           carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
           
+          RNN_input_err.append(
+              (input_weights[0] * A ) + \
+              (input_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error ) + \
+              (input_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error ) + \
+              (input_weights[3] * A )
+            )
+          
           output_layer_errors = [carry_LT, carry_ST, 
                                   [merged_A, merged_B, merged_C, merged_D], 
                                   [short_A, short_B, short_C, short_D], 
@@ -2287,9 +2338,11 @@ class Parallel:
           
           # output gate
           
-          bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+          
+          bias_C  = 1                                                             * error_C
+          input_C = incoming_input                                                * error_C
+          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
 
           # update gate
           
@@ -2313,6 +2366,12 @@ class Parallel:
                         ( carry_weights[1] * error_B                                                                                                                                                          ) + \
                         ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
                         ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+          
+          RNN_input_err.append(
+              (input_weights[0] * error_A) + \
+              (input_weights[1] * error_B) + \
+              (input_weights[2] * error_C)
+            )
           
           output_layer_errors = [
                                   carry_error, 
@@ -2413,18 +2472,25 @@ class Parallel:
             # calculate CARRY
             
             carry_ST = (ST_weights[0] * A) + \
-                        (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
-                        (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
-                        (ST_weights[3] * A)
+                       (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                       (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                       (ST_weights[3] * A)
             
             carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
+            
+            RNN_input_err.append(
+              (input_weights[0] * A ) + \
+              (input_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error ) + \
+              (input_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error ) + \
+              (input_weights[3] * A )
+            )
             
             layer_errors = [carry_LT, carry_ST, 
                             [merged_A, merged_B, merged_C, merged_D], 
                             [short_A, short_B, short_C, short_D], 
                             [input_A, input_B, input_C, input_D], 
                             [out_a, out_b, out_we]
-                            ]
+                           ]
             
           elif type(branch) == GRU:
 
@@ -2439,9 +2505,11 @@ class Parallel:
             
             # output gate
             
-            bias_C  = 1                                                             * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-            input_C = incoming_input                                                * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-            carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+            error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+            
+            bias_C  = 1                                                             * error_C
+            input_C = incoming_input                                                * error_C
+            carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
 
             # update gate
             
@@ -2465,6 +2533,12 @@ class Parallel:
                           ( carry_weights[1] * error_B                                                                                                                                                          ) + \
                           ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
                           ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+            
+            RNN_input_err.append(
+                (input_weights[0] * error_A) + \
+                (input_weights[1] * error_B) + \
+                (input_weights[2] * error_C)
+              )
             
             layer_errors = [
                             carry_error, 
@@ -3086,10 +3160,11 @@ class Convolution:
     -----
     Args
     -----
-    - kernel                (2D Array)      : the kernel to apply
+    - kernel                (width, height) : the kernel to apply, automatically generated
     - activation            (string)        : the activation function
     - (Optional) bias       (bool)          : weither to use bias, default is False
     - (Optional) learnable  (boolean)       : whether or not the kernel is learnable, defaults to True
+    - (Optional) weights    (2D array)      : the kernel to apply, in case the kernel is not learnable
     - (Optional) name       (string)        : the name of the layer
     -----
     Activation functions
@@ -3111,13 +3186,16 @@ class Convolution:
     - Sigmoid
     - Tanh
     """
-    self.kernel = kernel
+    self.kernel = arraytools.generate_random_array(kernel[0], kernel[1])
+    
     self.activation = activation.lower()
     self.learnable = kwargs.get('learnable', True)
     self.use_bias = kwargs.get('bias', False)
     self.bias = kwargs.get('bias_value', 0)
     self.name = kwargs.get('name', 'convolution')
+    self.weights = kwargs.get('weights', self.kernel)
     self.input_shape = 0
+    self.kernel = self.weights
 
   def apply(self, input):
     self.input_shape = (len(input[0]), len(input))

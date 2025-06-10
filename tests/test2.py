@@ -14,7 +14,8 @@ sys.path.append(pynet_root_dir)
 from tools import arraytools
 from tools.visual import numerical_display
 
-onedim = [1,2,3]
+onedim  = [1,2,3]
+onedim2 = [1,2,3,4,5]
 
 twodim = [
   [1,2,3],

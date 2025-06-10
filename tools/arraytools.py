@@ -109,7 +109,7 @@ def flatten(input):
     1D List
   """
   answer = []
-  if type(input[0]) == list:
+  if len(shape(input)) == 2:
     for layer in input:
       for element in layer:
         answer.append(element)
@@ -274,7 +274,7 @@ def generate_random_array(*args, **kwargs):
   -----
   Args
   -----
-  args (int) : the dimensions of the array
+  *args (int) : the dimensions of the array
   min  (int) : the minimum value of the array
   max  (int) : the maximum value of the array
   

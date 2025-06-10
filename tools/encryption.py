@@ -1,15 +1,20 @@
 """
 Encryption
 -----
-Do not use this for commercial purposes, these are just demos
-
+Do not use this for actual use, these are just demos
 """
 
 def encrypt(word, key, format):
   """
-  Do not use this for commercial purposes.
+  Encryption
   -----
-  This is merely a simple encryption function to convert plaintext to encrypted text. it is unsecure by modern, industry standards
+    Encrypts a word with a key, works simmilar to a vigenère cipher
+  -----
+  Args
+  -----
+    word    (string) : the word to be encrypted
+    key     (string) : the symmetric key to encrypt the word with
+    format  (string) : the list of valid charachters
   """
   # 92 characters long including spaces, start counting from 0, no specials
   chars = list(str(format))
@@ -114,9 +119,15 @@ def encrypt(word, key, format):
 
 def decrypt(word, key, format):
   """
-  Do not use this for commercial purposes.
+  Encryption
   -----
-  This is merely a simple decryption function to convert encrypted text to plaintext. it is unsecure by modern, industry standards
+    Encrypts a word with a key, works simmilar to a vigenère cipher
+  -----
+  Args
+  -----
+    word    (string) : the word to be decrypted
+    key     (string) : the symmetric key to decrypt the word with
+    format  (string) : the list of valid charachters
   """
   
   chars = list(str(format))
@@ -216,9 +227,15 @@ def decrypt(word, key, format):
 
 def hash(word, hashtype, format=" abcdefghijklmnopqrstuvwxyzZYXWVUTSRQPONMLKJIHGFEDCBA0123456789!?@#$%&*~-=_+/[]{}<>;:|,.`'\""):
   """
-  Do not use this for commercial purposes.
+  Encryption
   -----
-  This is merely a simple hashing function to convert text to a hash. it is unsecure by modern, industry standards
+    Encrypts a word with a key, works simmilar to a vigenère cipher
+  -----
+  Args
+  -----
+    word     (string) : the word to be encrypted
+    hashtype (string) : the post-hashing mapping of the charachters
+    format   (string) : the list of valid charachters
   """
   
   # premade hashtypes
