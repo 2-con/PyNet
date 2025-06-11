@@ -81,7 +81,7 @@ def reshape(input, width, height):
         row.append(pile[0])
         pile.pop(0)
       except:
-        raise ValueError(f"Cannot reshape matrix into a {width}x{height} matrix")
+        raise ValueError(f"Cannot reshape a {shape(input)} matrix into a {width}x{height} matrix")
 
     answer.append(row[:])
 
@@ -286,9 +286,9 @@ def generate_random_array(*args, **kwargs):
   min = kwargs.get('min', 0)
   max = kwargs.get('max', 1)
 
-  if not all(isinstance(dim, int) for dim in args):
+  if not all(isinstance(dim, int) for dim in args[::-1]):
     raise TypeError("All dimensions must be integers.")
-  if not all(dim > 0 for dim in args):
+  if not all(dim > 0 for dim in args[::-1]):
     raise ValueError("All dimensions must be greater than 0.")
   if min > max:
     raise ValueError("min_val must be less than or equal to max_val.")
@@ -302,7 +302,7 @@ def generate_random_array(*args, **kwargs):
     else:
       return [_generate_inner(dimensions[1:]) for _ in range(dimensions[0])]
 
-  return _generate_inner(args)
+  return _generate_inner(args[::-1])
 
 def shape(input):
   """

@@ -8,16 +8,25 @@ Synapse API
 Provides
 -----
   (Learnable layers)
-  1. Convolution layers
-  2. Dense layers
+  1. Convolution
+  2. Dense
 
   (Utility layers)
-  1. Maxpooling layers
-  2. Meanpooling layers
-  3. Flatten layers
-  4. Reshape layers
-  5. AFS (Adaptive Feature Scaler) layers
+  1. Maxpooling
+  2. Meanpooling
+  3. Flatten
+  4. Reshape
+  5. AFS (Adaptive Feature Scaler)
   6. Operation (normalization and activation functions)
+  
+  (Parallelization / Branching)
+  7. Parallel
+  8. Merge
+  
+  (Recurrent units)
+  9. Recurrent
+  10. LSTM
+  11. GRU
 
 """
 #######################################################################################################
@@ -119,6 +128,13 @@ Optimizer = optimizer.Optimizer # set global object
     do_something(blah blah blah)
   
   i will combust
+
+10/6/2025
+
+  line 2662, under parallel > backprop > datacontainer instance > convolution
+  i dont know why i need to subtract 2 from the iteration, but it works...
+  
+  still paranoid tho.
 
 """
 
@@ -548,20 +564,15 @@ class Sequential:
 
           elif type(layer) == Parallel:
             
-            if type(x) == Datacontainer:
-              x = x.data[:]
-            
-            # invoke internal class to establish activations and weighted sums
             layer.internal(1, x)
             weighted_sums.append(layer.WS)
-            # weighted_sums.append(['Parallel obj'])
           
           else:
             weighted_sums.append(x)
           
           x = layer.apply(x)
           activations.append(x)
-
+          
       return activations, weighted_sums
 
     def Backpropagate(activations, weighted_sums, target):
@@ -838,7 +849,8 @@ class Sequential:
           raise NotImplementedError("Parallel layer as the last layer is ambiguous, consider appending a 'Merge' layer after.")
           
         elif type(self.layers[-1]) == Merge:
-          output_layer_errors = [initial_gradient for _ in range(len(self.layers[-1].input_shapes))]
+          # the parallel layer (if any) will automatically handle this
+          output_layer_errors = initial_gradient
         
         else:
           raise NotImplementedError(f"Layer {self.layers[-1].__class__.__name__} as the last layer is not supported.")
@@ -996,6 +1008,8 @@ class Sequential:
           # force into a 2D array
           if len(arraytools.shape(layer_errors)) == 1:
             layer_errors = [layer_errors]
+            
+          #print(layer_errors)
 
         elif type(this_layer) == Reshape:
 
@@ -1292,8 +1306,6 @@ class Sequential:
           # if the parallel layer is a RNN-type layer, in that case, DO process the errors
           elif this_layer.RNN or this_layer.LSTM or this_layer.GRU:
             
-            #print(prev_errors)
-            
             layer_errors = this_layer.internal(2, prev_errors, prev_layer, LSTM_incoming_input=LSTM_incoming_input)
             
           # if it contains other stuff, then split the incoming error appropriately
@@ -1305,7 +1317,12 @@ class Sequential:
                 prev_errors = prev_errors * len(this_layer.branches)
                 
               elif prev_layer.merge_type == 'average':
-                prev_errors = [error / len(prev_layer.input_shapes) for error in prev_errors] * len(this_layer.branches)
+                
+                if len(arraytools.shape(prev_errors)) == 2:
+                  prev_errors = [[[error / len(prev_layer.input_shapes) for error in row] for row in prev_errors] for _ in range(len(this_layer.branches))]
+
+                else:
+                  prev_errors = [[error / len(prev_layer.input_shapes) for error in prev_errors] for _ in range(len(this_layer.branches))]
               
               elif prev_layer.merge_type == 'concat':
                 
@@ -1334,7 +1351,7 @@ class Sequential:
               else:
                 raise SystemError(f'Unknown merging policy: {prev_layer.merge_type}')
               
-              layer_errors = prev_errors
+              layer_errors = this_layer.internal(2, prev_errors, prev_layer, LSTM_incoming_input=LSTM_incoming_input)
             
         elif type(this_layer) == Merge:
           
@@ -1657,7 +1674,7 @@ class Sequential:
     # neural network fitting
     x = features[0]
     sizes = [arraytools.shape(x)]
-    calibrate = False
+    calibrate = True
     
     timestep = 1
     
@@ -1685,7 +1702,7 @@ class Sequential:
 
         elif type(layer) in (AFS, Dense, Operation, Localunit):
 
-          if not calibrate:
+          if calibrate:
             
             if layer_index == 0: # first layer
               layer.reshape_input_shape(len(features[0]), (1,1))
@@ -1711,15 +1728,21 @@ class Sequential:
 
         elif type(layer) == Parallel:
           
-          if not calibrate:
+          if calibrate:
             
             if type(x) == Datacontainer:
               x = x.data[:]
-            
-            layer.calibrate([len(x) for _ in range(len(layer.branches))], [[1,1] for _ in range(len(layer.branches))], self.optimizer, self.loss, self.learning_rate)
-            
-            x = layer.apply(x)
-            sizes.append(arraytools.shape(x))
+              
+              layer.calibrate([len(x) for _ in range(len(layer.branches))], [[1,1] for _ in range(len(layer.branches))], self.optimizer, self.loss, self.learning_rate)
+              x = layer.apply(Datacontainer(x))
+              sizes.append(arraytools.shape(x.data))
+
+              # visual.numerical_display(x.data)
+              
+            else:
+              layer.calibrate([len(x) for _ in range(len(layer.branches))], [[1,1] for _ in range(len(layer.branches))], self.optimizer, self.loss, self.learning_rate)
+              x = layer.apply(x)
+              sizes.append(arraytools.shape(x.data))
             
           else:
             
@@ -1738,7 +1761,7 @@ class Sequential:
             else: # every other layer
               layer.calibrate([sizes[layer_index][0] for _ in range(len(layer.branches))], [sizes[layer_index+2] for _ in range(len(layer.branches))], self.optimizer, self.loss, self.learning_rate, alpha = self.alpha, beta = self.beta, epsilon = self.epsilon, gamma = self.gamma, delta = self.delta, experimental = self.experimental)
 
-      calibrate = True
+      calibrate = False
       
       self.sizes = sizes
     
@@ -1831,7 +1854,7 @@ class Sequential:
 
       correct = 0
 
-      for i in (utility.progress_bar(range(len(features)), f"Evaluating with {metric}", "Complete", decimals=2, length=50, empty=' ') if not stats else range(len(features))):
+      for i in (utility.progress_bar(range(len(features)), f"Evaluating with {metric}", "Complete", decimals=2, length=75, empty=' ') if not stats else range(len(features))):
 
         predicted = self.push(features[i])
         actual = targets[i]
@@ -2122,11 +2145,13 @@ class Parallel:
     
     def Propagate(input):
 
-      x = input[:]
-      activations = [x]
+      activations = []
       weighted_sums = []
 
       if self.RNN:
+        
+        if type(input) == Datacontainer:
+          x = input.data
         
         input_index = 0
         output = 0
@@ -2151,6 +2176,8 @@ class Parallel:
           weighted_sums.append(outputWS)
       
       elif self.LSTM:
+        if type(input) == Datacontainer:
+          x = input.data
         
         long_memory = 0
         short_memory = 0
@@ -2172,6 +2199,9 @@ class Parallel:
           weighted_sums.append([LT, ST, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term])
       
       elif self.GRU:
+        if type(input) == Datacontainer:
+          x = input.data
+          
         input_index = 0
         output = 0
         outputWS = 0
@@ -2195,18 +2225,35 @@ class Parallel:
           weighted_sums.append(outputWS)
       
       else: # any other type of network
-        x = input[:]
-        xWS = 0
-        for branch in self.branches:
+        
+        if type(input) == Datacontainer:
+          # most likely coming from another parallel layer
           
-          if type(branch) in (Convolution, Dense, AFS, Operation, Localunit):
-            xWS = branch.get_weighted_sum(x)
-            weighted_sums.append(xWS)
-
-          else:
-            weighted_sums.append(x)
+          xWS = 0
+          for branch, branch_input in zip(self.branches, input.data):
             
-          activations.append(x)  
+            if type(branch) in (Convolution, Dense, AFS, Operation, Localunit):
+              xWS = branch.get_weighted_sum(branch_input)
+              weighted_sums.append(xWS)
+
+            else:
+              weighted_sums.append(branch_input)
+              
+            activations.append(branch_input)  
+          
+        else:
+          x = input[:]
+          xWS = 0
+          for branch in self.branches:
+            
+            if type(branch) in (Convolution, Dense, AFS, Operation, Localunit):
+              xWS = branch.get_weighted_sum(x)
+              weighted_sums.append(xWS)
+
+            else:
+              weighted_sums.append(x)
+              
+            activations.append(x)  
 
       self.activations = activations
       self.WS          = weighted_sums
@@ -2553,240 +2600,451 @@ class Parallel:
         return RNN_input_err
         
       else:
-        for branch_index, branch in enumerate(self.branches):
-          # FRONT | next layer --> this layer --> previous layer | BACK
-          # dont forget that this is a parralel class.
-
-          this_activations = activations[branch_index]
-          this_WS          = weighted_sums[branch_index]
-
-          prev_errors = incoming_errors
+        
+        if type(prev_layer) == Datacontainer:
+          previous_layer = prev_layer.data[:]
           
-          if type(incoming_errors) == Datacontainer:
-            incoming_errors = incoming_errors.data[branch_index]
+          for (branch_index, branch), prev_layer in zip(enumerate(self.branches), previous_layer):
+            # FRONT | next layer --> this layer --> previous layer | BACK
+            # dont forget that this is a parralel class.
 
-          layer_errors = []
+            this_activations = activations[branch_index]
+            this_WS          = weighted_sums[branch_index]
 
-          if type(branch) in (Dense, AFS, Localunit):
+            prev_errors = incoming_errors[branch_index]
 
-            for this_neuron_index, _ in enumerate(branch.neurons):
+            layer_errors = []
 
-              neuron_error = []
+            if type(branch) in (Dense, AFS, Localunit):
 
-              derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
+              for this_neuron_index, _ in enumerate(branch.neurons):
 
-              if type(prev_layer) == Dense:
-                
-                print("aaaa")
+                neuron_error = []
 
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+                derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
 
-                layer_errors.append( derivative * sum(neuron_error) )
+                if type(prev_layer) == Dense:
+                  
+                  print("aaaa")
 
-              elif type(prev_layer) == AFS:
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
 
-                layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+                  layer_errors.append( derivative * sum(neuron_error) )
 
-              elif type(prev_layer) == Operation:
+                elif type(prev_layer) == AFS:
 
-                layer_errors.append( derivative * prev_errors[this_neuron_index] )
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
 
-              elif type(prev_layer) == Localunit:
+                elif type(prev_layer) == Operation:
 
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
 
-                  if index_corrector(this_neuron_index-prev_neuron_index) != None:
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+                elif type(prev_layer) == Localunit:
 
-                layer_errors.append( derivative * sum(neuron_error) )
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-          elif type(branch) == Convolution:
-            
-            # make sure to change this for experimentation since 'experimental' is a sequential attribute,
-            # not a parallel attribute. 
-            if 1==2:
-              kernel = arraytools.mirror(branch.kernel[:], 'X')
-            else:
-              kernel = branch.kernel[:]
+                    if index_corrector(this_neuron_index-prev_neuron_index) != None:
+                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
 
-            layer_errors = arraytools.generate_array(value=0, *branch.input_shape)
+                  layer_errors.append( derivative * sum(neuron_error) )
 
-            for a in range(len(layer_errors) - (len(branch.kernel) - 1)):
-              for b in range(len(layer_errors[0]) - (len(branch.kernel[0]) - 1)):
-
-                # Apply the flipped kernel to the corresponding region in layer_errors
-                for kernel_row in range(len(kernel)):
-                  for kernel_col in range(len(kernel[0])):
-                    
-                    # Calculate the corresponding position in layer_errors
-                    output_row = a + kernel_row
-                    output_col = b + kernel_col
-                    
-                    # Accumulate the weighted error
-                    layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
-
-          elif type(branch) == Flatten:
-
-            for this_neuron_index in range(len(branch.neurons)):
-
-              neuron_error = []
-
-              if type(prev_layer) == Dense:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-              elif type(prev_layer) == AFS:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
-
-              elif type(prev_layer) == Operation:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index])
-
-              elif type(prev_layer) == Localunit:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-              layer_errors.append( sum(neuron_error) )
-
-            sizex, sizey = branch.input_shape
-
-            layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
-
-          elif type(branch) == Reshape:
-
-            sizex, sizey = branch.input_shape
-
-            layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
-
-          elif type(branch) == Maxpooling:
-            thisx, thisy = branch.input_size
-
-            layer_errors = arraytools.generate_array(thisx, thisy, value=0)
-
-            skibidi = -1
-
-            # iterate over all the layers
-            for a in range(0, thisx, branch.stride):
-
-              skibidi += 1
-              toilet = -1
-
-              # # iterate over all the elements in the layer
-              for b in range(0, thisy, branch.stride):
-                toilet += 1
-
-                max_value = this_WS[skibidi][toilet]  # Get the maximum value
-                count = 0  # Count of elements with the maximum value
-
-                # Find all elements with the maximum value in the pooling window
-                for c in range(branch.size):
-                  for d in range(branch.size):
-                    if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
-                      if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
-                        count += 1
-
-                # Distribute the gradient equally among the maximum elements
-                for c in range(branch.size):
-                  for d in range(branch.size):
-                    if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
-                      if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
-                        layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
-
-          elif type(branch) == Meanpooling:
-
-            thisx, thisy = branch.input_size
-
-            layer_errors = arraytools.generate_array(thisx, thisy, value=0)
-
-            # for meanpooling, we need to distribute the error over the kernel size
-            # this is done by dividing the error by the kernel size (averaging it over the kernel size)
-
-            skibidi = -1
-
-            # iterate over all the layers
-            for a in range(0, thisx, branch.stride):
-
-              skibidi += 1
-              toilet = -1
-
-              # iterate over all the elements in the layer
-              for b in range(0, thisy, branch.stride):
-                toilet += 1
-
-                # control the vertical
-                for c in range(branch.size):
-
-                  # control the horizontal
-                  for d in range(branch.size):
-
-                    if a+c < thisx and b+d < thisy:
-
-                      # distribute the error over the kernel size
-
-                      layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (branch.size**2)
-
-          elif type(branch) == Operation:
-
-            if branch.operation == 'min max scaler':
-              derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, min=branch.minimum, max=branch.maximum) for a in this_WS]
-
-            elif branch.operation == 'standard scaler':
-              derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, std=branch.std) for a in this_WS]
-
-            elif branch.operation == 'max abs scaler':
-              derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, max=branch.maximum) for a in this_WS]
-
-            elif branch.operation == 'robust scaler':
-              derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, q1=branch.q1, q3=branch.q3) for a in this_WS]
-
-            elif branch.operation == 'softmax':
-              derivative_list = Key.SCALER_DERIVATIVE[branch.operation](this_activations)
-
-            for this_neuron_index in range(len(this_layer.neurons)):
-
-              neuron_error = []
-
-              if branch.operation in Key.ACTIVATION_DERIVATIVE:
-                derivative = Key.ACTIVATION_DERIVATIVE[branch.operation](this_WS[this_neuron_index])
+            elif type(branch) == Convolution:
+              
+              # make sure to change this for experimentation since 'experimental' is a sequential attribute,
+              # not a parallel attribute. 
+              if 1==2:
+                kernel = arraytools.mirror(branch.kernel[:], 'X')
               else:
-                derivative = derivative_list[this_neuron_index]
+                kernel = branch.kernel[:]
 
-              if type(prev_layer) == Dense:
+              layer_errors = arraytools.generate_array(value=0, *branch.input_shape)
 
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+              for a in   range(len(layer_errors   ) - (len(branch.kernel   ) - 1)):
+                for b in range(len(layer_errors[0]) - (len(branch.kernel[0]) - 1)):
 
-                layer_errors.append( derivative * sum(neuron_error) )
+                  # Apply the kernel to the corresponding region in layer_errors
+                  for kernel_row in range(len(kernel)):
+                    for kernel_col in range(len(kernel[0])):
+                      
+                      # Calculate the corresponding position in layer_errors
+                      output_row = a + kernel_row
+                      output_col = b + kernel_col
+                      
+                      # # Accumulate the weighted error
+                      layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[a][b])
+                      
+            elif type(branch) == Flatten:
 
-              elif type(prev_layer) == AFS:
+              for this_neuron_index in range(len(branch.neurons)):
 
-                layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+                neuron_error = []
 
-              elif type(prev_layer) == Operation:
-                layer_errors.append( derivative * prev_errors[this_neuron_index] )
+                if type(prev_layer) == Dense:
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-              elif type(prev_layer) == Localunit:
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
 
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                elif type(prev_layer) == AFS:
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-                  if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
 
-                layer_errors.append( derivative * sum(neuron_error) )
+                elif type(prev_layer) == Operation:
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-              elif type(prev_layer) == Reshape:
+                    neuron_error.append(prev_errors[prev_neuron_index])
 
-                layer_errors.append( prev_errors[this_neuron_index] )
+                elif type(prev_layer) == Localunit:
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-          errors[branch_index] = layer_errors[:]
-      
+                    if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+                layer_errors.append( sum(neuron_error) )
+
+              sizex, sizey = branch.input_shape
+
+              layer_errors = arraytools.reshape(layer_errors[:], sizex, sizey)
+
+            elif type(branch) == Reshape:
+
+              sizex, sizey = branch.input_shape
+
+              layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
+
+            elif type(branch) == Maxpooling:
+              thisx, thisy = branch.input_size
+
+              layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+              skibidi = -1
+
+              # iterate over all the layers
+              for a in range(0, thisx, branch.stride):
+
+                skibidi += 1
+                toilet = -1
+
+                # # iterate over all the elements in the layer
+                for b in range(0, thisy, branch.stride):
+                  toilet += 1
+
+                  max_value = this_WS[skibidi][toilet]  # Get the maximum value
+                  count = 0  # Count of elements with the maximum value
+
+                  # Find all elements with the maximum value in the pooling window
+                  for c in range(branch.size):
+                    for d in range(branch.size):
+                      if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
+                        if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
+                          count += 1
+
+                  # Distribute the gradient equally among the maximum elements
+                  for c in range(branch.size):
+                    for d in range(branch.size):
+                      if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
+                        if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
+                          layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+
+            elif type(branch) == Meanpooling:
+
+              thisx, thisy = branch.input_size
+
+              layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+              # for meanpooling, we need to distribute the error over the kernel size
+              # this is done by dividing the error by the kernel size (averaging it over the kernel size)
+
+              skibidi = -1
+
+              # iterate over all the layers
+              for a in range(0, thisx, branch.stride):
+
+                skibidi += 1
+                toilet = -1
+
+                # iterate over all the elements in the layer
+                for b in range(0, thisy, branch.stride):
+                  toilet += 1
+
+                  # control the vertical
+                  for c in range(branch.size):
+
+                    # control the horizontal
+                    for d in range(branch.size):
+
+                      if a+c < thisx and b+d < thisy:
+
+                        # distribute the error over the kernel size
+
+                        layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (branch.size**2)
+
+            elif type(branch) == Operation:
+
+              if branch.operation == 'min max scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, min=branch.minimum, max=branch.maximum) for a in this_WS]
+
+              elif branch.operation == 'standard scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, std=branch.std) for a in this_WS]
+
+              elif branch.operation == 'max abs scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, max=branch.maximum) for a in this_WS]
+
+              elif branch.operation == 'robust scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, q1=branch.q1, q3=branch.q3) for a in this_WS]
+
+              elif branch.operation == 'softmax':
+                derivative_list = Key.SCALER_DERIVATIVE[branch.operation](this_activations)
+
+              for this_neuron_index in range(len(this_layer.neurons)):
+
+                neuron_error = []
+
+                if branch.operation in Key.ACTIVATION_DERIVATIVE:
+                  derivative = Key.ACTIVATION_DERIVATIVE[branch.operation](this_WS[this_neuron_index])
+                else:
+                  derivative = derivative_list[this_neuron_index]
+
+                if type(prev_layer) == Dense:
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+                elif type(prev_layer) == AFS:
+
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+                elif type(prev_layer) == Operation:
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+                elif type(prev_layer) == Localunit:
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                    if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+                elif type(prev_layer) == Reshape:
+
+                  layer_errors.append( prev_errors[this_neuron_index] )
+
+            errors[branch_index] = layer_errors[:]
+        
+        else:
+          
+          for branch_index, branch in enumerate(self.branches):
+            # FRONT | next layer --> this layer --> previous layer | BACK
+            # dont forget that this is a parralel class.
+
+            this_activations = activations[branch_index]
+            this_WS          = weighted_sums[branch_index]
+            
+            prev_errors = incoming_errors[branch_index]
+
+            layer_errors = []
+            
+            if type(branch) in (Dense, AFS, Localunit):
+
+              for this_neuron_index, _ in enumerate(branch.neurons):
+
+                neuron_error = []
+
+                derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
+
+                if type(prev_layer) == Dense:
+                  
+                  print("aaaa")
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+                elif type(prev_layer) == AFS:
+
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+                elif type(prev_layer) == Operation:
+
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+                elif type(prev_layer) == Localunit:
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                    if index_corrector(this_neuron_index-prev_neuron_index) != None:
+                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+            elif type(branch) == Convolution:
+              
+              # make sure to change this for experimentation since 'experimental' is a sequential attribute,
+              # not a parallel attribute. 
+              if 1==2:
+                kernel = arraytools.mirror(branch.kernel[:], 'X')
+              else:
+                kernel = branch.kernel[:]
+
+              layer_errors = arraytools.generate_array(value=0, *branch.input_shape)
+
+              for a in   range(len(layer_errors   ) - (len(branch.kernel   ) - 1)):
+                for b in range(len(layer_errors[0]) - (len(branch.kernel[0]) - 1)):
+
+                  # Apply the kernel to the corresponding region in layer_errors
+                  for kernel_row in range(len(kernel)):
+                    for kernel_col in range(len(kernel[0])):
+                      
+                      # Calculate the corresponding position in layer_errors
+                      output_row = a + kernel_row
+                      output_col = b + kernel_col
+                      
+                      # # Accumulate the weighted error
+                      layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[a][b])
+                      
+            elif type(branch) == Flatten:
+
+              sizex, sizey = branch.input_shape
+
+              layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
+              
+              # force into a 2D array
+              if len(arraytools.shape(layer_errors)) == 1:
+                layer_errors = [layer_errors]
+
+            elif type(branch) == Reshape:
+
+              sizex, sizey = branch.input_shape
+
+              layer_errors = arraytools.reshape(prev_errors[:], sizex, sizey)
+
+            elif type(branch) == Maxpooling:
+              thisx, thisy = branch.input_size
+
+              layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+              skibidi = -1
+
+              # iterate over all the layers
+              for a in range(0, thisx, branch.stride):
+
+                skibidi += 1
+                toilet = -1
+
+                # # iterate over all the elements in the layer
+                for b in range(0, thisy, branch.stride):
+                  toilet += 1
+
+                  max_value = this_WS[skibidi][toilet]  # Get the maximum value
+                  count = 0  # Count of elements with the maximum value
+
+                  # Find all elements with the maximum value in the pooling window
+                  for c in range(branch.size):
+                    for d in range(branch.size):
+                      if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
+                        if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
+                          count += 1
+
+                  # Distribute the gradient equally among the maximum elements
+                  for c in range(branch.size):
+                    for d in range(branch.size):
+                      if a + c < len(weighted_sums[branch_index - 1]) and b + d < len(weighted_sums[branch_index - 1][a]):
+                        if weighted_sums[branch_index - 1][a + c][b + d] == max_value:
+                          layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+
+            elif type(branch) == Meanpooling:
+
+              thisx, thisy = branch.input_size
+
+              layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+
+              # for meanpooling, we need to distribute the error over the kernel size
+              # this is done by dividing the error by the kernel size (averaging it over the kernel size)
+
+              skibidi = -1
+
+              # iterate over all the layers
+              for a in range(0, thisx, branch.stride):
+
+                skibidi += 1
+                toilet = -1
+
+                # iterate over all the elements in the layer
+                for b in range(0, thisy, branch.stride):
+                  toilet += 1
+
+                  # control the vertical
+                  for c in range(branch.size):
+
+                    # control the horizontal
+                    for d in range(branch.size):
+
+                      if a+c < thisx and b+d < thisy:
+
+                        # distribute the error over the kernel size
+
+                        layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (branch.size**2)
+
+            elif type(branch) == Operation:
+
+              if branch.operation == 'min max scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, min=branch.minimum, max=branch.maximum) for a in this_WS]
+
+              elif branch.operation == 'standard scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, std=branch.std) for a in this_WS]
+
+              elif branch.operation == 'max abs scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, max=branch.maximum) for a in this_WS]
+
+              elif branch.operation == 'robust scaler':
+                derivative_list = [Key.SCALER_DERIVATIVE[branch.operation](a, q1=branch.q1, q3=branch.q3) for a in this_WS]
+
+              elif branch.operation == 'softmax':
+                derivative_list = Key.SCALER_DERIVATIVE[branch.operation](this_activations)
+
+              for this_neuron_index in range(len(this_layer.neurons)):
+
+                neuron_error = []
+
+                if branch.operation in Key.ACTIVATION_DERIVATIVE:
+                  derivative = Key.ACTIVATION_DERIVATIVE[branch.operation](this_WS[this_neuron_index])
+                else:
+                  derivative = derivative_list[this_neuron_index]
+
+                if type(prev_layer) == Dense:
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+                elif type(prev_layer) == AFS:
+
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+                elif type(prev_layer) == Operation:
+                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+                elif type(prev_layer) == Localunit:
+
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+                    if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+                  layer_errors.append( derivative * sum(neuron_error) )
+
+                elif type(prev_layer) == Reshape:
+
+                  layer_errors.append( prev_errors[this_neuron_index] )
+
+            errors[branch_index] = layer_errors[:]
+        
         return errors
         
     def update(errors, layer_index, learning_rate, timestep):
@@ -3128,17 +3386,35 @@ class Parallel:
     
     else:
       
-      answer = []
-      
-      for branch in self.branches:
+      # handle cases where its coming from another parallel layer
+      if type(x) == Datacontainer:
+        answer = []
 
-        if type(branch) in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit):
-          answer.append(branch.apply(x))
+        #print(x.data)
+        
+        for branch, branch_input in zip(self.branches, x.data):
 
-        else:
-          raise TypeError(f"Unknown type {type(branch)}")
+          if type(branch) in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit):
+            answer.append(branch.apply(branch_input))
 
-      return Datacontainer(answer)
+          else:
+            raise TypeError(f"Unknown type {type(branch)}")
+
+        return Datacontainer(answer)
+
+      else:
+        # probably a fork
+        answer = []
+        
+        for branch in self.branches:
+
+          if type(branch) in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit):
+            answer.append(branch.apply(x))
+
+          else:
+            raise TypeError(f"Unknown type {type(branch)}")
+
+        return Datacontainer(answer)
 
 #######################################################################################################
 #                                         Component Classes                                           #
@@ -3162,7 +3438,7 @@ class Convolution:
     -----
     - kernel                (width, height) : the kernel to apply, automatically generated
     - activation            (string)        : the activation function
-    - (Optional) bias       (bool)          : weither to use bias, default is False
+    - (Optional) bias       (bool)          : weither to use bias, defaults to True
     - (Optional) learnable  (boolean)       : whether or not the kernel is learnable, defaults to True
     - (Optional) weights    (2D array)      : the kernel to apply, in case the kernel is not learnable
     - (Optional) name       (string)        : the name of the layer
@@ -3190,7 +3466,7 @@ class Convolution:
     
     self.activation = activation.lower()
     self.learnable = kwargs.get('learnable', True)
-    self.use_bias = kwargs.get('bias', False)
+    self.use_bias = kwargs.get('bias', True)
     self.bias = kwargs.get('bias_value', 0)
     self.name = kwargs.get('name', 'convolution')
     self.weights = kwargs.get('weights', self.kernel)
@@ -3198,7 +3474,7 @@ class Convolution:
     self.kernel = self.weights
 
   def apply(self, input):
-    self.input_shape = (len(input[0]), len(input))
+    self.input_shape = arraytools.shape(input)
     answer = []
     
     m_rows = len(input)
@@ -4039,10 +4315,10 @@ class Merge:
       final_answer = arraytools.total(*input)
       
       if len(arraytools.shape(final_answer)) == 2:
-        final_answer = [[scaler/self.input_shape for scaler in row] for row in final_answer]
+        final_answer = [[scaler/len(self.input_shapes) for scaler in row] for row in final_answer]
         
       else:
-        final_answer = [scaler/self.input_shape for scaler in final_answer]
+        final_answer = [scaler/len(self.input_shapes) for scaler in final_answer]
     
     self.points = len(final_answer)
     return final_answer

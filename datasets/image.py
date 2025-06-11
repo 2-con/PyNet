@@ -44,14 +44,26 @@ if __name__ == "__main__":
 
 class mnist:
   def __init__(self, one_hot=False, normalized=False):
+    """
+    MNIST Dataset
+    -----
+      Loads the MNIST dataset from a JSON file. with configurable one-hot encoding and normalization.
+      by default, they are both set to false. invoke the 'load()' method to fetch the data.
+      
+      make sure to load the Dataset into the system by running this file, then configure the path to the JSON file.
+    -----
+      Args:
+      - one_hot    (bool) : if True, the labels are one-hot encoded
+      - normalized (bool) : if True, the images are normalized
+    """
     self.one_hot = one_hot
     self.normalized = normalized
-    with open(r'datasets\mnist.json', 'r') as f:
+    with open(r'C:\Users\User\OneDrive\Desktop\homework\Coding\Python\Database\mnist.json', 'r') as f:
       self.data = json.load(f)
   
   def load(self):
     """
-    load
+    Load Dataset
     -----
       Returns the MNIST dataset as a tuple of 4 lists. If one_hot is True, the labels are one-hot encoded.
     -----

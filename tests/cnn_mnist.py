@@ -5,7 +5,7 @@ current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-from api import synapse as tf
+from api import synapse as ai
 
 from tools.visual import image_display
 from tools.scaler import argmax
@@ -15,31 +15,33 @@ import matplotlib.pyplot as plt
 
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
 
-# model architecture
-model = tf.Sequential()
-model.add(tf.Convolution(kernel=generate_random_array(2,2, min=-1, max=1), activation='elu', bias=True, learnable=True))
-model.add(tf.Maxpooling(2,2))
-model.add(tf.Convolution(kernel=generate_random_array(2,2, min=-1, max=1), activation='elu', bias=True, learnable=True))
-model.add(tf.Maxpooling(2,2))
-model.add(tf.Convolution(kernel=generate_random_array(2,2, min=-1, max=1), activation='elu', bias=True, learnable=True))
-model.add(tf.Flatten())
-model.add(tf.Dense(16, activation='elu'))
-model.add(tf.Dense(10, activation='elu'))
-model.add(tf.Operation(operation='softmax'))
+  
+model = ai.Sequential( 
+    
+  ai.Convolution((4,4), 'elu'),
+  ai.Convolution((4,4), 'elu'),
+  ai.Flatten(),
+  ai.Dense(32, 'elu'),
+  ai.Dense(16, 'elu'),
+  ai.Dense(16, 'elu'),
+  ai.Dense(10, 'elu'),
+  ai.Operation('softmax')
+  
+)
 
 model.compile(
   optimizer='adam',
   loss='categorical crossentropy',
   metrics=['accuracy'],
   batchsize = 1,
-  learning_rate=0.011,
-  epochs=250,
+  learning_rate=0.002,
+  epochs=100,
 )
 
 model.fit(
-  train_images[:1000],
-  train_labels[:1000],
-  verbose=4,
+  train_images[:50],
+  train_labels[:50],
+  verbose=2,
   regularity=1
 )
 
@@ -56,7 +58,7 @@ for predicted, true in zip(predicted_label, train_labels[img_index]):
 print()
 print(f"{argmax(predicted_label) == argmax(train_labels[img_index])}    {argmax(train_labels[img_index])} | {argmax(predicted_label)}")
 
-model.evaluate(test_images[:1000], test_labels[:1000])
+model.evaluate(test_images[:5000], test_labels[:5000])
 
 plt.plot(range(len(model.error_logs)), model.error_logs)
 plt.title("Model Loss vs Epoch")

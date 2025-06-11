@@ -48,7 +48,7 @@ if test == 1: # CNN
   
   model = ai.Sequential( 
     
-    ai.Convolution( kernel=generate_random_array(2,2), activation='relu', bias=True, learnable=True ),
+    ai.Convolution((2,2), 'relu'),
     ai.Flatten(),
   )
 
@@ -230,27 +230,35 @@ elif test == 6: # Paralellization test
   
   training_features = [
     
-    [
-      [1, 1, 1],
-      [1, 1, 1],
-      [1, 1, 1]
-    ]
+    generate_random_array(20,20)
+    
   ]
 
   training_target = [
-    [1, 1]
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   ]
+  
+  KRNL = (2,2)
   
   model = ai.Sequential( 
     
-    # ai.Dense(2, activation='elu'),
-    ai.Parallel( ai.Convolution((2,2), activation='elu'), ai.Convolution((2,2), activation='elu') ),
-    # ai.Parallel( ai.Dense(2, activation='elu'), ai.Dense(3, activation='elu') ),
-    # ai.Parallel( ai.Recurrent('none', input=True, output=True), ai.Recurrent('none', input=True, output=True) ),
-    ai.Merge('concat'),
-    ai.Convolution((2,2), activation='elu'),
-    ai.Flatten(),
-    ai.Dense(2, activation='elu'),
+    ai.Parallel(
+    ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu')
+    ),
+  ai.Parallel(
+    ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu')
+    ),
+  ai.Parallel(
+    ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu'), ai.Convolution(KRNL, 'elu')
+    ),
+  ai.Parallel(
+    ai.Flatten(), ai.Flatten(), ai.Flatten(), ai.Flatten(),
+    ),
+  ai.Merge('concat'),
+  ai.Dense(16, 'elu'),
+  ai.Dense(16, 'elu'),
+  ai.Dense(10, 'elu'),
+  ai.Operation('softmax')
   )
 
   model.compile(
@@ -258,7 +266,7 @@ elif test == 6: # Paralellization test
     loss='mean squared error', 
     learning_rate=0.01,
     batch_size=1,
-    epochs=1000,
+    epochs=500,
     metrics=['accuracy']
   )
   

@@ -5,7 +5,7 @@ current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-import api.synapse as tf
+import api.synapse as ai
 
 from tools.visual import image_display
 from tools.scaler import argmax
@@ -14,27 +14,28 @@ import matplotlib.pyplot as plt
 
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
 
-# model architecture
-model = tf.Sequential()
-model.add(tf.Flatten())
-model.add(tf.Dense(128, activation='elu'))
-model.add(tf.Dense(32, activation='elu'))
-model.add(tf.Dense(32, activation='elu'))
-model.add(tf.Dense(10, activation='elu'))
-model.add(tf.Operation(operation='softmax'))
+model = ai.Sequential( 
+                        
+  ai.Flatten(),
+  ai.Dense(128, 'elu'),
+  ai.Dense(32, 'elu'),
+  ai.Dense(32, 'elu'),
+  ai.Dense(10, 'elu'),
+  # ai.Operation('softmax')
+)
 
 model.compile(
   optimizer='adam',
-  loss='categorical crossentropy',
+  loss='mean squared error',
   metrics=['accuracy'],
   batchsize = 1,
-  learning_rate=0.1,
-  epochs=100
+  learning_rate=0.001,
+  epochs=100,
 )
 
 model.fit(
-  train_images[:10],
-  train_labels[:10],
+  train_images[:50],
+  train_labels[:50],
   verbose=4,
   regularity=1
 )
