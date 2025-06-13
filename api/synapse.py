@@ -243,7 +243,6 @@ class Key:
     'recall': Metrics.Recall,
     'f1 score': Metrics.F1_score,
     'roc auc': Metrics.ROC_AUC,
-    'log loss': Metrics.Log_Loss,
     'r2 score': Metrics.R2_Score,
 
   }
@@ -345,22 +344,22 @@ class Sequential:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
+    - optimizer                   (str)   : optimizer to use
+    - loss                        (str)   : loss function to use
+    - metrics                     (list)  : metrics to use
+    - learning_rate               (float) : learning rate to use
+    - epochs                      (int)   : number of epochs to train for
     
-    - (Optional) early_stopping  (bool)  : whether or not to use early stopping, defaults to False
-    - (Optional) patience        (bool)  : how many epochs to wait before early stopping, defaults to 5
-    - (Optional) validation      (bool)  : whether or not to track validation, defaults to False
-    - (Optional) split           (float) : data split ratio for training, the rest is for validation, defaults to 1 (ranges from 0 to 1)
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use, refer to the documentation for more information
+    - (Optional) early_stopping   (bool)  : whether or not to use early stopping, defaults to False
+    - (Optional) patience         (bool)  : how many epochs to wait before early stopping, defaults to 5
+    - (Optional) validation       (bool)  : the metrics for validation, defaults to the loss
+    - (Optional) validation_split (float) : controls how much of the training data is used for validation, defaults to 0 (ranges from 0 to 1)
+    - (Optional) batchsize        (int)   : batch size, defaults to 1
+    - (Optional) initialization   (int)   : weight initialization
+    - (Optional) experimental     (str)   : experimental settings to use, refer to the documentation for more information
     
-    - (optional) verbose  (int) : whether to show anything during training
-    - (optional) logging  (int) : how often to show training stats
+    - (optional) verbose          (int) : whether to show anything during training
+    - (optional) logging          (int) : how often to show training stats
     
     Optimizer hyperparameters
     -----
@@ -414,8 +413,8 @@ class Sequential:
     self.experimental = kwargs.get('experimental', [])
     self.stopping = kwargs.get('early_stopping', False)
     self.patience = kwargs.get('patience', 5)
-    self.validation = kwargs.get('validation', False)
-    self.split = kwargs.get('split', 1)
+    self.validation = kwargs.get('validation', loss.lower())
+    self.validation_split = kwargs.get('validation_split', 0)
     
     self.verbose = kwargs.get('verbose', 0)
     self.logging = kwargs.get('logging', 1)
@@ -448,19 +447,18 @@ class Sequential:
       raise ValueError("batchsize must be greater than 0")
     if self.patience < 1:
       raise ValueError("patience must be greater than or equal to 1")
-    if self.split <= 0 or self.split > 1:
-      raise ValueError("split must be between 0 and 1")
-    if self.split == 1:
-      if self.validation:
-        raise ValueError("conflicting choices, split must be less than 1 if validation is True")
+    if self.validation_split < 0 or self.validation_split > 1:
+      raise ValueError("validation split must be between 0 and 1")
     if type(self.stopping) != bool:
       raise ValueError("early stopping must be a boolean")
-    if type(self.validation) != bool:
-      raise ValueError("validation must be a boolean")
+    if type(self.validation) != str:
+      raise ValueError("validation must be a string of a valid metric or loss function")
     if self.logging < 1:
       raise ValueError("logging must be greater than or equal to 1, or set 'verbose' to 0 if the intent is to show nothing")
     if self.verbose < 0:
       raise ValueError("verbose must be greater than or equal to 0, or set 'verbose' to 0 if the intent is to show nothing")
+    if self.validation not in Key.METRICS and self.validation not in Key.ERROR:
+      raise ValueError("validation must be a string of a valid metric or loss function")
       
     # Compiler - error prevention
     if self.optimizer is None:
@@ -625,27 +623,42 @@ class Sequential:
       if True: # calculate the initial gradient
 
         if self.loss == 'total squared error':
-          initial_gradient = [(pred - true) for pred, true in zip(predicted, target)]
+          initial_gradient = [
+            (pred - true) 
+            for pred, true in zip(predicted, target)
+            ]
 
         elif self.loss == 'mean abseloute error':
-          initial_gradient = [math2.sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
+          initial_gradient = [
+            math2.sgn(pred - true) / len(target) 
+            for pred, true in zip(predicted, target)
+            ]
 
         elif self.loss == 'total abseloute error':
-          initial_gradient = [math2.sgn(pred - true) for pred, true in zip(predicted, target)]
+          initial_gradient = [
+            math2.sgn(pred - true) 
+            for pred, true in zip(predicted, target)
+            ]
 
         elif self.loss == 'categorical crossentropy':
 
-          initial_gradient = [-true / pred if pred != 0 else -1000 for true, pred in zip(target, predicted)]
+          initial_gradient = [
+            -true / pred if pred != 0 else -1000 
+            for true, pred in zip(target, predicted)
+            ]
 
         elif self.loss == 'sparse categorical crossentropy':
 
-          initial_gradient = [-(true == i) / pred if pred != 0 else -1000 for i, pred, true in zip(range(len(predicted)), predicted, target)]
+          initial_gradient = [
+            -(true == i) / pred if pred != 0 else -1000 
+            for i, pred, true in zip(range(len(predicted)), predicted, target)
+            ]
 
         elif self.loss == 'binary crossentropy':
 
           initial_gradient = [
-                              -1 / pred if true == 1 else 1 / (1 - pred) if pred < 1 else 1000
-                              for true, pred in zip(target, predicted)
+            -1 / pred if true == 1 and pred != 0 else 1 / (1 - pred) if pred < 1 and pred != 0 else 1000
+            for true, pred in zip(target, predicted)
           ]
 
         elif self.loss == 'hinge loss':
@@ -1418,7 +1431,7 @@ class Sequential:
             # seperate the error into components to be processed
             if type(prev_layer) == Merge:
               if prev_layer.merge_type == 'total':
-                prev_errors = prev_errors * len(this_layer.branches)
+                prev_errors = [prev_errors for _ in range(len(this_layer.branches))]
                 
               elif prev_layer.merge_type == 'average':
                 
@@ -1798,12 +1811,12 @@ class Sequential:
     self.is_trained = True
     epochs = self.epochs + 1
     
-    train_amount = int(self.split * len(features))
-    validation_features = features[train_amount:][:]
-    validation_targets  = targets[train_amount:][:]
+    train_amount = int(self.validation_split * len(features))
+    validation_features = features[:train_amount][:]
+    validation_targets  = targets[:train_amount][:]
     
-    features  = features[:train_amount][:]
-    targets   = targets[:train_amount][:]
+    features  = features[train_amount:][:]
+    targets   = targets[train_amount:][:]
     
     if True: # Error Prevention
 
@@ -1924,8 +1937,11 @@ class Sequential:
     # main training loop - iterate over the epochs
     for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if self.verbose==1 else range(epochs):
       epoch_loss = 0
+      
+      # main training section - iterate over the entire dataset
       for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)})%", decimals=2, length=70, empty=' ') if self.verbose==2 else range(0, len(features), self.batchsize):
-
+        
+        # main batching loop - iterate through the batches
         for batch_index in range(self.batchsize):
 
           if base_index + batch_index >= len(features):
@@ -1972,29 +1988,52 @@ class Sequential:
         update(activations, weighted_sums, errors, timestep)
         errors = []
 
-      if self.validation:
+      # post-training stuff
+      
+      # log the eror
+      epoch_loss /= len(features)
+      self.error_logs.append(epoch_loss)
+      
+      # validation
+      if len(validation_features) > 0:
         validation_loss = 0
+        predicted_values = []
         
-        for feature, target in zip(validation_features, validation_targets):
+        # fetch the predictions
+        for feature in validation_features:
           
           if self.RNN or self.LSTM or self.GRU:
             predicted = self.push(feature)
 
           else:
             predicted, _ = Propagate(feature)
+            predicted = predicted[-1]
           
-          validation_loss += Key.ERROR[self.loss](target, predicted[-1])
+          predicted_values.append(predicted)
+        
+        if self.validation in Key.ERROR:
+          for true, pred in zip(validation_targets, predicted_values):
+          
+            validation_loss += Key.ERROR[self.loss](true, pred)
+          
+          validation_loss /= len(validation_features)
+          
+        else:
+          validation_loss = Key.METRICS[self.validation](predicted_values, validation_targets)
         
         self.validation_error_logs.append(validation_loss)
         
-      self.error_logs.append(epoch_loss)
-      
-      if self.stopping:
-        ...
+      # early stopping      
+      if self.stopping and epoch >= self.patience and len(validation_features) > 0:
+        
+        patience_scope = self.validation_error_logs[ epoch - self.patience:epoch ]
+        
+        if all(validation_loss > err for err in patience_scope):
+          break
 
       if epoch % self.logging == 0 and self.verbose>=3:
         prefix = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%) "
-        suffix = f"| Loss: {str(epoch_loss):20} |"
+        suffix = f"| Loss: {str(epoch_loss):22} |"
 
         rate = f" ROC: {epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
 
@@ -2008,35 +2047,31 @@ class Sequential:
     Evaluate
     -----
       Validates the model based on the given validation data and prints out the results. this assumes an already compiled model.
+      the results from this will automatically be saved to the summary table.
     -----
     Args
     -----
-    - features (list)  : the features to use
-    - targets  (list)  : the corresponding targets to use
-
-    - (optional) stats    (bool)  : show training stats
+    - features           (list) : the features to use
+    - targets            (list) : the corresponding targets to use
+    - (optional) verbose (int)  : wether to show anything on screen
+    - (optional) logging (bool) : wether to print out results after evaluating the model
     """
     self.is_validated = True
+    
+    verbose = kwargs.get('verbose', 0)
+    logging = kwargs.get('logging', False)
 
-    stats = kwargs.get('stats', False)
+    for metric_index in (utility.progress_bar(range(len(self.metrics)), f"Evaluating model", "Complete", decimals=2, length=75, empty=' ') if verbose == 1 else range(len(self.metrics))):
 
-    for metric in self.metrics:
-
+      metric = metric[metric_index]
       correct = 0
 
-      for i in (utility.progress_bar(range(len(features)), f"Evaluating with {metric}", "Complete", decimals=2, length=75, empty=' ') if not stats else range(len(features))):
+      for i in (utility.progress_bar(range(len(features)), f"Evaluating with {metric}", "Complete", decimals=2, length=75, empty=' ') if verbose == 2 else range(len(features))):
 
         predicted = self.push(features[i])
         actual = targets[i]
 
         correct += int(scaler.argmax(predicted) == scaler.argmax(actual))
-
-        # if scaler.argmax(predicted) != scaler.argmax(actual):
-        #   visual.image_display(features[i])
-        #   print(f"actual: {actual}")
-        #   print(f"predicted: {predicted}")
-        #   print(f"actual: {scaler.argmax(actual)}")
-        #   print(f"predicted: {scaler.argmax(predicted)}")
 
       print(f"accuracy: {100*(correct/len(features))}%")
 
@@ -3247,7 +3282,7 @@ class Parallel:
         
         return errors
         
-    def update(errors, layer_index, learning_rate, timestep):
+    def update(errors, layer_index, learning_rate, timestep, **kwargs):
       # 'errors' should stay the same; all the errors from all the previous
       # batches that have been processed as one. it is NOT summed up.
       

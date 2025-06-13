@@ -15,8 +15,8 @@ def image_display(input, **kwargs):
   Args
   -----
   - (Optional) boundary        (float) : the boundary seperating light from dark values
-  - (Optional) upper_tolerance (float) : the upper tolerance for the image
-  - (Optional) lower_tolerance (float) : the lower tolerance for the image
+  - (Optional) upper_tolerance (float) : pixels with values higher than the boundary + upper_tolerance will be displayed as "■"
+  - (Optional) lower_tolerance (float) : pixels with values lower than the boundary - lower_tolerance will be displayed as "□"
   - (Optional) title           (string) : the title of the image
   
   Returns

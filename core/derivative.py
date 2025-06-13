@@ -24,7 +24,7 @@ def Tanh_derivative(x):
   return 1 - (math.tanh(x))**2
 
 def Binary_step_derivative(x):
-  return Tanh_derivative(x)
+  return Sigmoid_derivative(x)
 
 def Softsign_derivative(x):
   return 1 / (1 + abs(x))
