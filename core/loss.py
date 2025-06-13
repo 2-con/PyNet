@@ -1,5 +1,22 @@
 import math
 
+def Root_Mean_Squared_Error(y_true:list, y_pred:list):
+  """
+  Root Mean Squared Error
+  -----
+    Returns the root mean squared error of the model
+  -----
+  Args
+  -----
+  - y_true (list) : the true values
+  - y_pred (list) : the predicted values
+
+  Returns
+  -----
+    (float) : the root mean squared error of the model
+  """
+  return math.sqrt(Mean_squared_error(y_true, y_pred))
+
 def Mean_squared_error(y_true:list, y_pred:list):
   if len(y_true) != len(y_pred):
     raise Exception("y_true and y_pred must have the same length")

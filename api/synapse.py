@@ -52,14 +52,8 @@ if __name__ == "__main__":
 import sys
 import os
 
-# Get the directory of the current script (test.py)
 current_script_dir = os.path.dirname(__file__)
-
-# Navigate up one level to the 'PyNet' directory
-# If test.py is in PyNet/tests/, then '..' takes us to PyNet/
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
-
-# Add the PyNet root directory to Python's module search path
 sys.path.append(pynet_root_dir)
 
 import random
@@ -140,7 +134,9 @@ Optimizer = optimizer.Optimizer # set global object
 
 """ TODO:
 
-  - impliment the parallel class
+  - rework the evaluate function
+  - impliment dropout layers
+  - add L1 and L2 regularization
 
 """
 
@@ -248,18 +244,6 @@ class Key:
     'f1 score': Metrics.F1_score,
     'roc auc': Metrics.ROC_AUC,
     'log loss': Metrics.Log_Loss,
-
-    # categorical error
-    'categorical crossentropy': Error.Categorical_crossentropy,
-    'binary crossentropy': Error.Binary_crossentropy,
-    'hinge loss': Error.Hinge_loss,
-
-    # continuous error
-    'mean squared error': Error.Mean_squared_error,
-    'mean abseloute error': Error.Mean_absolute_error,
-    'total squared error': Error.Total_squared_error,
-    'total abseloute error': Error.Total_absolute_error,
-    'root mean squared error': Metrics.Root_Mean_Squared_Error,
     'r2 score': Metrics.R2_Score,
 
   }
@@ -332,6 +316,7 @@ class Sequential:
     self.is_validated   = False # if the model is already validated
 
     self.error_logs = []
+    self.validation_error_logs = []
 
     self.optimizer_instance = Optimizer()
 
@@ -356,7 +341,7 @@ class Sequential:
     -----
       Compiles the model to be ready for training.
       the PyNet commpiler will automatically take care of hyperparameters and fine tuning under the hood
-      unless explicitly defined
+      unless explicitly defined 
     -----
     Args
     -----
@@ -365,10 +350,18 @@ class Sequential:
     - metrics                    (list)  : metrics to use
     - learning_rate              (float) : learning rate to use
     - epochs                     (int)   : number of epochs to train for
+    
+    - (Optional) early_stopping  (bool)  : whether or not to use early stopping, defaults to False
+    - (Optional) patience        (bool)  : how many epochs to wait before early stopping, defaults to 5
+    - (Optional) validation      (bool)  : whether or not to track validation, defaults to False
+    - (Optional) split           (float) : data split ratio for training, the rest is for validation, defaults to 1 (ranges from 0 to 1)
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-
+    - (Optional) experimental    (str)   : experimental settings to use, refer to the documentation for more information
+    
+    - (optional) verbose  (int) : whether to show anything during training
+    - (optional) logging  (int) : how often to show training stats
+    
     Optimizer hyperparameters
     -----
     - (Optional) alpha    (float)
@@ -386,10 +379,10 @@ class Sequential:
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGND        (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default     (Averaged Gradient)
     - Rprop       (Resilient propagation)
     - Momentum
-    - None        (Gradient Descent)
+    - None        (Full Gradient)
 
     Losses
     - mean squared error
@@ -408,17 +401,6 @@ class Sequential:
     - f1_score
     - roc_auc
     - log_loss
-
-    - categorical crossentropy
-    - binary crossentropy
-    - sparse categorical crossentropy
-    - hinge loss
-
-    - mean squared error
-    - mean abseloute error
-    - total squared error
-    - total abseloute error
-    - root mean squared error
     - r2_score
 
     """
@@ -427,15 +409,22 @@ class Sequential:
     self.metrics = [m.lower() for m in metrics]
     self.learning_rate = learning_rate
     self.epochs = epochs
+    
     self.batchsize = kwargs.get('batchsize', 1)
-
+    self.experimental = kwargs.get('experimental', [])
+    self.stopping = kwargs.get('early_stopping', False)
+    self.patience = kwargs.get('patience', 5)
+    self.validation = kwargs.get('validation', False)
+    self.split = kwargs.get('split', 1)
+    
+    self.verbose = kwargs.get('verbose', 0)
+    self.logging = kwargs.get('logging', 1)
+    
     self.alpha = kwargs.get('alpha', None) # momentum decay
     self.beta = kwargs.get('beta', None)
     self.epsilon = kwargs.get('epsilon', None) # zerodivison prevention
     self.gamma = kwargs.get('gamma', None)
     self.delta = kwargs.get('delta', None)
-
-    self.experimental = kwargs.get('experimental', [])
 
     self.is_compiled = True
 
@@ -448,36 +437,50 @@ class Sequential:
 
     # Kwargs - error prevention
     if learning_rate <= 0:
-      raise ValueError("learning_rate must be greater than 0")
+      raise ValueError("learning_rate must be positive")
     if type(learning_rate) != float:
       raise TypeError("learning_rate must be a float")
     if type(epochs) != int:
-      raise TypeError("epochs must be an int")
+      raise TypeError("epochs must be an intiger")
     if epochs <= 0:
-          raise ValueError("epochs must be greater than 0")
-
+      raise ValueError("epochs must be positive")
+    if self.batchsize <= 0:
+      raise ValueError("batchsize must be greater than 0")
+    if self.patience < 1:
+      raise ValueError("patience must be greater than or equal to 1")
+    if self.split <= 0 or self.split > 1:
+      raise ValueError("split must be between 0 and 1")
+    if self.split == 1:
+      if self.validation:
+        raise ValueError("conflicting choices, split must be less than 1 if validation is True")
+    if type(self.stopping) != bool:
+      raise ValueError("early stopping must be a boolean")
+    if type(self.validation) != bool:
+      raise ValueError("validation must be a boolean")
+    if self.logging < 1:
+      raise ValueError("logging must be greater than or equal to 1, or set 'verbose' to 0 if the intent is to show nothing")
+    if self.verbose < 0:
+      raise ValueError("verbose must be greater than or equal to 0, or set 'verbose' to 0 if the intent is to show nothing")
+      
     # Compiler - error prevention
     if self.optimizer is None:
       raise ValueError("Optimizer not set")
     if self.optimizer not in Key.OPTIMIZER:
-      raise ValueError(f"Invalid optimizer {self.optimizer}")
-    if self.loss is None:
-      raise ValueError("Loss not set")
-    if self.metrics == None:
-      raise ValueError("Metrics not set")
+      raise ValueError(f"Invalid optimizer: {self.optimizer}")
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Invalid metric: {metric}")
+    if self.loss not in Key.ERROR:
+      raise ValueError(f"Invalid loss: {self.loss}")
 
   # processing
-
-  def fit(self, features, targets, **kwargs):
+  
+  def fit(self, features, targets):
     """
     Args
     -----
     - features (list)  : the features to use
     - targets  (list)  : the corresponding targets to use
-
-    - (optional) verbose       (int) : whether to show anything during training
-    - (optional) regularity    (int) : how often to show training stats
-    - (optional) decimals      (int) : how many decimals to show
     """
     def Propagate(input):
 
@@ -703,9 +706,10 @@ class Sequential:
 
         elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
 
-          for error, weighted in zip(initial_gradient, weighted_sums[-1]):
-            derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
-            output_layer_errors.append(error * derivative)
+          output_layer_errors = [
+              error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
+              for error, weighted in zip(initial_gradient, weighted_sums[-1])
+          ]
 
         elif type(self.layers[-1]) == Flatten: # if its a flatten layer
 
@@ -872,85 +876,196 @@ class Sequential:
         layer_errors = []
 
         if type(this_layer) in (Dense, AFS, Localunit):
-
-          for this_neuron_index, _ in enumerate(this_layer.neurons):
-
-            neuron_error = []
-
-            derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
-
-            if type(prev_layer) == Dense:
-
-              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-              layer_errors.append( derivative * sum(neuron_error) )
-
-            elif type(prev_layer) == AFS:
-
-              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
-
-            elif type(prev_layer) == Operation:
-
-              layer_errors.append( derivative * prev_errors[this_neuron_index] )
-
-            elif type(prev_layer) == Localunit:
-
-              for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-              layer_errors.append( derivative * sum(neuron_error) )
+          
+          if type(prev_layer) == Dense:
             
-            elif type(prev_layer) == Parallel:
+            layer_errors = [
+            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+            sum(
+                prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index]
+                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+            )
+            for this_neuron_index, _ in enumerate(this_layer.neurons)
+              ]
 
-              # different method for a RNN-type layer
-              if prev_layer.RNN or prev_layer.LSTM or prev_layer.GRU:
-                layer_errors = prev_errors
+          elif type(prev_layer) == AFS:
+            layer_errors = [
+            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+            prev_errors[this_neuron_index] *
+            prev_layer.neurons[this_neuron_index]['weight']
+            for this_neuron_index, _ in enumerate(this_layer.neurons)
+            ]
+            
+          elif type(prev_layer) == Operation:
+            layer_errors = [
+                  Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+                  prev_errors[this_neuron_index]
+                  for this_neuron_index, _ in enumerate(this_layer.neurons)
+              ]
+
+          elif type(prev_layer) == Localunit:
+            
+            layer_errors = [
+                Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+                sum(
+                    prev_errors[prev_neuron_index] * prev_neuron['weights'][
+                        index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) # Pass receptive_field
+                    ]
+                    for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                    if index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) is not None # Check condition here
+                )
+                for this_neuron_index, _ in enumerate(this_layer.neurons)
+            ]
+          
+          elif type(prev_layer) == Parallel:
+            
+            # different method for a RNN-type layer
+            if prev_layer.RNN or prev_layer.LSTM or prev_layer.GRU:
+              layer_errors = prev_errors
+            
+            else:
               
-              else:
-                
-                layer_errors = [0] * len(this_layer.neurons)
-                
-                if type(prev_layer.branches[0]) == Dense:
-                  for branch_index, branch in enumerate(prev_layer.branches):
-                    
-                    for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
-                      
-                      neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+              layer_errors = [0] * len(this_layer.neurons) # This initialization is crucial and needs to happen once before the outer loop
 
-                    layer_errors[this_neuron_index] += derivative * sum(neuron_error)
+              for this_neuron_index, _ in enumerate(this_layer.neurons):
+                # Reset neuron_error for each new neuron, if it's used
+                # Note: neuron_error is only used in Dense and Localunit branches.
+                # It's cleaner to declare it inside those branches to avoid scope confusion.
                 
+                derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
+
+                if type(prev_layer.branches[0]) == Dense:
+
+                  sum_of_neuron_error_contributions = sum(
+                      prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index]
+                      for branch_index, branch in enumerate(prev_layer.branches)
+                      for prev_neuron_index, prev_neuron in enumerate(branch.neurons)
+                  )
+                  layer_errors[this_neuron_index] += derivative * sum_of_neuron_error_contributions
+
                 elif type(prev_layer.branches[0]) == AFS:
-                  for branch_index, branch in enumerate(prev_layer.branches):
-                    layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] * branch.neurons[this_neuron_index]['weight']
-                
+
+                  # Use generator expression for sum directly if there are multiple branches
+                  sum_of_afs_contributions = sum(
+                      prev_errors[branch_index][this_neuron_index] * branch.neurons[this_neuron_index]['weight']
+                      for branch_index, branch in enumerate(prev_layer.branches)
+                  )
+                  layer_errors[this_neuron_index] += derivative * sum_of_afs_contributions
+
                 elif type(prev_layer.branches[0]) == Operation:
-                  for branch_index, branch in enumerate(prev_layer.branches):
-                    layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] 
+
+                  # Use generator expression for sum directly if there are multiple branches
+                  sum_of_operation_contributions = sum(
+                      prev_errors[branch_index][this_neuron_index]
+                      for branch_index, _ in enumerate(prev_layer.branches) # branch variable not used here
+                  )
+                  layer_errors[this_neuron_index] += derivative * sum_of_operation_contributions
                     
                 elif type(prev_layer.branches[0]) == Localunit:
-                  for branch_index, branch in enumerate(prev_layer.branches):
-                    
-                    for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
+                  
+                  sum_of_localunit_contributions = sum(
+                      prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][
+                          index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field)
+                      ]
+                      for branch_index, branch in enumerate(prev_layer.branches)
+                      for prev_neuron_index, prev_neuron in enumerate(branch.neurons)
+                      if index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) is not None
+                  )
+                  layer_errors[this_neuron_index] += derivative * sum_of_localunit_contributions
 
-                      if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                        neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-                    layer_errors[this_neuron_index] += derivative * sum(neuron_error)
-                
                 else:
-                  raise TypeError("Parallel 2D image processing on a 1D input is abiguous. consider reshaping the layer to 2D.")
+                  raise TypeError("Parallel 2D image processing on a 1D input is unclear. consider reshaping the layer to 2D.")
+          
+          elif type(prev_layer) == Merge:
                 
-                # pointwise summation of all errors since the input is distributed equally
-                # layer_errors = arraytools.total(*prev_errors)
+            layer_errors = [
+                Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+                prev_errors[this_neuron_index]
+                for this_neuron_index, _ in enumerate(this_layer.neurons)
+            ]
+
+          # keep this here, otherwise you wouldn't know whats going on          
+          # for this_neuron_index, _ in enumerate(this_layer.neurons):
+
+          #   neuron_error = []
+
+          #   derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index])
+
+          #   if type(prev_layer) == Dense:
+
+          #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+          #       neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+          #     layer_errors.append( derivative * sum(neuron_error) )
+
+          #   elif type(prev_layer) == AFS:
+
+          #     layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+
+          #   elif type(prev_layer) == Operation:
+
+          #     layer_errors.append( derivative * prev_errors[this_neuron_index] )
+
+          #   elif type(prev_layer) == Localunit:
+
+          #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+          #       if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+          #         neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+          #     layer_errors.append( derivative * sum(neuron_error) )
             
-            elif type(prev_layer) == Merge:
-              layer_errors.append( derivative * prev_errors[this_neuron_index] )
+          #   elif type(prev_layer) == Parallel:
+
+          #     # different method for a RNN-type layer
+          #     if prev_layer.RNN or prev_layer.LSTM or prev_layer.GRU:
+          #       layer_errors = prev_errors
+              
+          #     else:
+                
+          #       layer_errors = [0] * len(this_layer.neurons)
+                
+          #       if type(prev_layer.branches[0]) == Dense:
+          #         for branch_index, branch in enumerate(prev_layer.branches):
+                    
+          #           for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
+                      
+          #             neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+
+          #           layer_errors[this_neuron_index] += derivative * sum(neuron_error)
+                
+          #       elif type(prev_layer.branches[0]) == AFS:
+          #         for branch_index, branch in enumerate(prev_layer.branches):
+          #           layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] * branch.neurons[this_neuron_index]['weight']
+                
+          #       elif type(prev_layer.branches[0]) == Operation:
+          #         for branch_index, branch in enumerate(prev_layer.branches):
+          #           layer_errors[this_neuron_index] += derivative * prev_errors[branch_index][this_neuron_index] 
+                    
+          #       elif type(prev_layer.branches[0]) == Localunit:
+          #         for branch_index, branch in enumerate(prev_layer.branches):
+                    
+          #           for prev_neuron_index, prev_neuron in enumerate(branch.neurons):
+
+          #             if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+          #               neuron_error.append(prev_errors[branch_index][prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+          #           layer_errors[this_neuron_index] += derivative * sum(neuron_error)
+                
+          #       else:
+          #         raise TypeError("Parallel 2D image processing on a 1D input is abiguous. consider reshaping the layer to 2D.")
+                
+          #       # pointwise summation of all errors since the input is distributed equally
+          #       # layer_errors = arraytools.total(*prev_errors)
+            
+          #   elif type(prev_layer) == Merge:
+          #     layer_errors.append( derivative * prev_errors[this_neuron_index] )
 
         elif type(this_layer) == Convolution:
-
+          
+          if type(prev_layer) == Parallel:
+            prev_errors = arraytools.total(*prev_errors)
+          
           if 'BPP_kernel_flip' in self.experimental:
             kernel = arraytools.mirror(this_layer.kernel[:], 'X')
           else:
@@ -1033,21 +1148,6 @@ class Sequential:
             # # iterate over all the elements in the layer
             for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
               toilet += 1
-
-              # # control the vertical
-              # for c in range(this_layer.size):
-
-              #   # control the horizontal
-              #   for d in range(this_layer.size):
-
-              #     if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
-
-              #       # if the current element is the maximum value, send it all the error gradient
-
-              #       if (weighted_sums[this_layer_index-1][a+c][b+d] == this_WS[skibidi][toilet]):
-              #         layer_errors[a+c][b+d] += prev_errors[skibidi][toilet]
-
-              # ==========
 
               max_value = this_WS[skibidi][toilet]  # Get the maximum value
               count = 0  # Count of elements with the maximum value
@@ -1299,6 +1399,10 @@ class Sequential:
         elif type(this_layer) == Parallel:
           
           if type(prev_layer) == Parallel:
+            
+            if len(prev_layer.branches) != len(this_layer.branches) and not (this_layer.RNN or this_layer.LSTM or this_layer.GRU):
+              raise SystemError(f'Mismatching branches between parallel layers, Layer {this_layer_index + 1} has {len(this_layer.branches)} branches while layer {this_layer_index + 2} has {len(prev_layer.branches)} branches')
+            
             prev_layer = Datacontainer(prev_layer.branches)
             
             layer_errors = this_layer.internal(2, prev_errors, prev_layer, LSTM_incoming_input=LSTM_incoming_input)
@@ -1352,37 +1456,78 @@ class Sequential:
                 raise SystemError(f'Unknown merging policy: {prev_layer.merge_type}')
               
               layer_errors = this_layer.internal(2, prev_errors, prev_layer, LSTM_incoming_input=LSTM_incoming_input)
-            
+              
         elif type(this_layer) == Merge:
           
           if type(prev_layer) in (Dense, AFS, Operation, Localunit):
             
             for branch_index in range(this_layer.points):
               
-              neuron_error = []
+              # Determine the sum based on prev_layer type using a generator expression
+              current_neuron_sum = 0 # Initialize for safety, though sum() of empty gen is 0
 
               if type(prev_layer) == Dense:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][branch_index])
+                current_neuron_sum = sum(
+                  prev_errors[prev_neuron_index] * prev_neuron['weights'][branch_index]
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                )
 
               elif type(prev_layer) == AFS:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
+                current_neuron_sum = sum(
+                  prev_errors[prev_neuron_index] * prev_neuron['weight']
+                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                )
 
               elif type(prev_layer) == Operation:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index])
+                current_neuron_sum = sum(
+                  prev_errors[prev_neuron_index]
+                  for prev_neuron_index, _ in enumerate(prev_layer.neurons)
+                )
 
               elif type(prev_layer) == Localunit:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+                  # Note: 'this_neuron_index' is used here. Ensure it's correctly scoped.
+                  # It's typical for the outer loop to provide this for a specific neuron.
+                  current_neuron_sum = sum(
+                      prev_errors[prev_neuron_index] * prev_neuron['weights'][
+                          index_corrector(branch_index - prev_neuron_index, prev_layer.receptive_field) # Pass receptive_field
+                      ]
+                      for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                      if index_corrector(branch_index - prev_neuron_index, prev_layer.receptive_field) is not None
+                  )
+              
+              # Append the calculated sum for the current branch_index
+              layer_errors.append(current_neuron_sum)
+            
+            # keep this here so i know whats going on            
+            # for branch_index in range(this_layer.points):
+              
+            #   neuron_error = []
 
-                  if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][branch_index - prev_neuron_index])
+            #   if type(prev_layer) == Dense:
+            #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
-              layer_errors.append( sum(neuron_error) )
+            #       neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][branch_index])
+
+            #   elif type(prev_layer) == AFS:
+            #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+            #       neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
+
+            #   elif type(prev_layer) == Operation:
+            #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+            #       neuron_error.append(prev_errors[prev_neuron_index])
+
+            #   elif type(prev_layer) == Localunit:
+            #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+            #       if index_corrector(this_neuron_index-(prev_neuron_index)) != None:
+            #         neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][branch_index - prev_neuron_index])
+
+            #   layer_errors.append( sum(neuron_error) )
+            
+            
+            
             
           else: # probably an image
           
@@ -1392,7 +1537,7 @@ class Sequential:
 
       return errors
     
-    def update(activations, weighted_sum, errors, learning_rate, timestep):
+    def update(activations, weighted_sum, errors, timestep):
 
       alpha = self.alpha
       beta = self.beta
@@ -1401,8 +1546,9 @@ class Sequential:
       delta = self.delta
 
       optimize = Key.OPTIMIZER.get(self.optimizer)
-
+      learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
+      batchsize = self.batchsize
       
       for this_layer_index in reversed(range(len(self.layers))):
 
@@ -1414,21 +1560,20 @@ class Sequential:
 
           for neuron_index, neuron in enumerate(layer.neurons):
 
-            for weight_index in range(len(neuron['weights'])):
+            for weight_index, weight in enumerate(neuron['weights']):
 
               # calculate universal gradient
               weight_gradient = 0
-
+              
               for error_versions in errors:
-                
                 weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient /= len(errors)
+                weight_gradient /= batchsize
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+              neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
             # Updating bias
             bias_gradient = 0
@@ -1437,7 +1582,7 @@ class Sequential:
               bias_gradient += error_versions[this_layer_index][neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -1482,7 +1627,7 @@ class Sequential:
               param_id += 1
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient[a][b] /= len(errors)
+                weight_gradient[a][b] /= batchsize
 
               layer.kernel[a][b] = optimize(learning_rate, layer.kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
@@ -1490,7 +1635,7 @@ class Sequential:
             param_id += 1
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             layer.bias = optimize(learning_rate, layer.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
@@ -1506,7 +1651,7 @@ class Sequential:
               weight_gradient += error_versions[this_layer_index][this_neuron_index] * prev_activations[this_neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              weight_gradient /= len(errors)
+              weight_gradient /= batchsize
 
             param_id += 1
             layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -1519,7 +1664,7 @@ class Sequential:
                 bias_gradient += error_versions[this_layer_index][this_neuron_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                bias_gradient /= len(errors)
+                bias_gradient /= batchsize
 
               param_id += 1
               layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -1537,7 +1682,7 @@ class Sequential:
                 weight_gradient += error_versions[this_layer_index][neuron_index] * prev_activations[weight_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient /= len(errors)
+                weight_gradient /= batchsize
 
               # Update weights
               param_id += 1
@@ -1551,7 +1696,7 @@ class Sequential:
               bias_gradient += error_versions[this_layer_index][neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -1567,9 +1712,9 @@ class Sequential:
             B_gradient  += error_version[this_layer_index][2]
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            Wa_gradient /= len(errors)
-            Wb_gradient /= len(errors)
-            B_gradient  /= len(errors)
+            Wa_gradient /= batchsize
+            Wb_gradient /= batchsize
+            B_gradient  /= batchsize
 
           param_id += 1
           layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -1592,10 +1737,10 @@ class Sequential:
             EXTRA_ERR = [EXTRA_ERR[i] + error_version[this_layer_index][5][i] for i in range(3)]
             
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            B_ERR     = [a / len(errors) for a in B_ERR]
-            ST_ERR    = [b / len(errors) for b in ST_ERR]
-            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
-            EXTRA_ERR = [d / len(errors) for d in EXTRA_ERR]
+            B_ERR     = [a / batchsize for a in B_ERR]
+            ST_ERR    = [b / batchsize for b in ST_ERR]
+            INPUT_ERR = [c / batchsize for c in INPUT_ERR]
+            EXTRA_ERR = [d / batchsize for d in EXTRA_ERR]
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
@@ -1626,9 +1771,9 @@ class Sequential:
             INPUT_ERR = [INPUT_ERR[i] + error_version[this_layer_index][3][i] for i in range(3)]
             
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            B_ERR     = [a / len(errors) for a in B_ERR]
-            C_ERR     = [b / len(errors) for b in C_ERR]
-            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+            B_ERR     = [a / batchsize for a in B_ERR]
+            C_ERR     = [b / batchsize for b in C_ERR]
+            INPUT_ERR = [c / batchsize for c in INPUT_ERR]
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
@@ -1644,21 +1789,22 @@ class Sequential:
         
         elif type(layer) == Parallel:
           
-          layer.internal(3, errors, this_layer_index, learning_rate, timestep)
-        
+          layer.internal(3, errors, this_layer_index, learning_rate, timestep, batchsize=self.batchsize)
+      
     #################################################################################################
     #                                     Automatic Fitting                                         #
     #################################################################################################
     
     self.is_trained = True
-
-    # variables
-    learning_rate = self.learning_rate
     epochs = self.epochs + 1
-
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
-
+    
+    train_amount = int(self.split * len(features))
+    validation_features = features[train_amount:][:]
+    validation_targets  = targets[train_amount:][:]
+    
+    features  = features[:train_amount][:]
+    targets   = targets[:train_amount][:]
+    
     if True: # Error Prevention
 
       # Function args - error prevention
@@ -1675,7 +1821,7 @@ class Sequential:
     x = features[0]
     sizes = [arraytools.shape(x)]
     calibrate = True
-    
+    errors = []
     timestep = 1
     
     # calibration and structure intialization
@@ -1686,6 +1832,9 @@ class Sequential:
       for layer_index, layer in enumerate(self.layers):
 
         if type(layer) in (Maxpooling, Meanpooling, Convolution, Reshape):
+          
+          if type(x) == Datacontainer:
+            raise TypeError("Attempted to process a parallel output during calibration, consider adding a 'Merge' layer to define the output")
           
           x = layer.apply(x)
           sizes.append(arraytools.shape(x))
@@ -1701,7 +1850,10 @@ class Sequential:
           sizes.append(arraytools.shape(x))
 
         elif type(layer) in (AFS, Dense, Operation, Localunit):
-
+          
+          if type(x) == Datacontainer:
+            raise TypeError("Attempted to process a parallel output during calibration, consider adding a 'Merge' layer to define the output")
+          
           if calibrate:
             
             if layer_index == 0: # first layer
@@ -1768,14 +1920,11 @@ class Sequential:
     self.RNN  = any(type(layer) == Recurrent for layer in self.layers)
     self.LSTM = any(type(layer) == LSTM for layer in self.layers)
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
-    self.mLSTM = any(type(layer) == mLSTM for layer in self.layers)
-    self.sLSTM = any(type(layer) == sLSTM for layer in self.layers)
     
     # main training loop - iterate over the epochs
-    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if verbose==1 else range(epochs):
+    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if self.verbose==1 else range(epochs):
       epoch_loss = 0
-      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)})%", decimals=2, length=70, empty=' ') if verbose==2 else range(0, len(features), self.batchsize):
-        errors = []
+      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)})%", decimals=2, length=70, empty=' ') if self.verbose==2 else range(0, len(features), self.batchsize):
 
         for batch_index in range(self.batchsize):
 
@@ -1784,6 +1933,8 @@ class Sequential:
 
           activations, weighted_sums = Propagate(features[base_index + batch_index])
           
+          # if its a RNN model, append 0s to the 'disabled' layers
+          # to match pred size with model size
           if self.RNN or self.LSTM or self.GRU:
             
             skibidi = 0
@@ -1802,13 +1953,14 @@ class Sequential:
             target = targets[base_index + batch_index]
           
           errors.append(Backpropagate(activations, weighted_sums, target))
+          
+          # errors.append([[0 for neuron in layer.neurons] for layer in self.layers])
 
           if self.RNN or self.LSTM or self.GRU:
             predicted = self.push(features[base_index + batch_index])
 
           else:
             predicted = activations[-1]
-            target = targets[base_index + batch_index]
           
           epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], predicted)
         
@@ -1817,19 +1969,37 @@ class Sequential:
         if 'frozenTS' in self.experimental:
           timestep = 1
         
-        update(activations, weighted_sums, errors, learning_rate, timestep)
+        update(activations, weighted_sums, errors, timestep)
         errors = []
 
+      if self.validation:
+        validation_loss = 0
+        
+        for feature, target in zip(validation_features, validation_targets):
+          
+          if self.RNN or self.LSTM or self.GRU:
+            predicted = self.push(feature)
+
+          else:
+            predicted, _ = Propagate(feature)
+          
+          validation_loss += Key.ERROR[self.loss](target, predicted[-1])
+        
+        self.validation_error_logs.append(validation_loss)
+        
       self.error_logs.append(epoch_loss)
+      
+      if self.stopping:
+        ...
 
-      if epoch % regularity == 0 and verbose>=3:
+      if epoch % self.logging == 0 and self.verbose>=3:
         prefix = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%) "
-        suffix = f"| Loss: {str(epoch_loss):25} |"
+        suffix = f"| Loss: {str(epoch_loss):20} |"
 
-        rate = f" ROC: {epoch_loss - self.error_logs[epoch-1] if epoch > 0 else 0}"
+        rate = f" ROC: {epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
 
         pad = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%) ") - len(prefix))
-        print(prefix + pad + suffix + rate if verbose == 4 else prefix + pad + suffix)
+        print(prefix + pad + suffix + rate if self.verbose == 4 else prefix + pad + suffix)
 
   # post-processing
 
@@ -1874,10 +2044,25 @@ class Sequential:
 
   def push(self, x):
     """
+    Propagate
+    -----
+      Propagates the input through the entire model, excluding dropout layers (if any).
+      weights will not be updated.
+    -----
     Args
     -----
-    x (list) : the input to the model
+      x (list) : the input to the model
+
+    Returns
+    -----
+      output (list) : the output of the model, always a list
     """
+    
+    if type(x) != list:
+      raise TypeError("""
+    even though its not really a problem, the input to the model must be a list for consistency.
+    navigate to the systems config to disable this error message.
+    """)
 
     if self.RNN:
 
@@ -2612,42 +2797,87 @@ class Parallel:
             this_WS          = weighted_sums[branch_index]
 
             prev_errors = incoming_errors[branch_index]
-
+            
             layer_errors = []
 
             if type(branch) in (Dense, AFS, Localunit):
 
-              for this_neuron_index, _ in enumerate(branch.neurons):
+              
+              if type(prev_layer) == Dense:
+                
+                
+                
+                layer_errors = [
+                Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index]) *
+                sum(
+                    prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index]
+                    for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                )
+                for this_neuron_index, _ in enumerate(branch.neurons)
+                  ]
 
-                neuron_error = []
+              elif type(prev_layer) == AFS:
+                layer_errors = [
+                Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index]) *
+                prev_errors[this_neuron_index] *
+                prev_layer.neurons[this_neuron_index]['weight']
+                for this_neuron_index, _ in enumerate(branch.neurons)
+                ]
+                
+              elif type(prev_layer) == Operation:
+                layer_errors = [
+                      Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index]) *
+                      prev_errors[this_neuron_index]
+                      for this_neuron_index, _ in enumerate(branch.neurons)
+                  ]
 
-                derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
+              elif type(prev_layer) == Localunit:
+                
+                layer_errors = [
+                    Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index]) *
+                    sum(
+                        prev_errors[prev_neuron_index] * prev_neuron['weights'][
+                            index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) # Pass receptive_field
+                        ]
+                        for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
+                        if index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) is not None # Check condition here
+                    )
+                    for this_neuron_index, _ in enumerate(branch.neurons)
+                ]
+          
+              
+              
+              # for this_neuron_index, _ in enumerate(branch.neurons):
 
-                if type(prev_layer) == Dense:
-                  
-                  print("aaaa")
+              #   neuron_error = []
 
-                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
+              #   derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
 
-                  layer_errors.append( derivative * sum(neuron_error) )
+              #   if type(prev_layer) == Dense:
 
-                elif type(prev_layer) == AFS:
+              #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+              #       neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
 
-                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
+              #     layer_errors.append( derivative * sum(neuron_error) )
 
-                elif type(prev_layer) == Operation:
+              #   elif type(prev_layer) == AFS:
 
-                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
+              #     layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
 
-                elif type(prev_layer) == Localunit:
+              #   elif type(prev_layer) == Operation:
 
-                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+              #     layer_errors.append( derivative * prev_errors[this_neuron_index] )
 
-                    if index_corrector(this_neuron_index-prev_neuron_index) != None:
-                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+              #   elif type(prev_layer) == Localunit:
 
-                  layer_errors.append( derivative * sum(neuron_error) )
+              #     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
+
+              #       if index_corrector(this_neuron_index-prev_neuron_index) != None:
+              #         neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
+
+              #     layer_errors.append( derivative * sum(neuron_error) )
+
+
 
             elif type(branch) == Convolution:
               
@@ -2850,38 +3080,8 @@ class Parallel:
             
             if type(branch) in (Dense, AFS, Localunit):
 
-              for this_neuron_index, _ in enumerate(branch.neurons):
-
-                neuron_error = []
-
-                derivative = Key.ACTIVATION_DERIVATIVE[branch.activation](this_WS[this_neuron_index])
-
-                if type(prev_layer) == Dense:
-                  
-                  print("aaaa")
-
-                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                    neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-                  layer_errors.append( derivative * sum(neuron_error) )
-
-                elif type(prev_layer) == AFS:
-
-                  layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
-
-                elif type(prev_layer) == Operation:
-
-                  layer_errors.append( derivative * prev_errors[this_neuron_index] )
-
-                elif type(prev_layer) == Localunit:
-
-                  for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                    if index_corrector(this_neuron_index-prev_neuron_index) != None:
-                      neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index-prev_neuron_index])
-
-                  layer_errors.append( derivative * sum(neuron_error) )
-
+              layer_errors = prev_errors
+                
             elif type(branch) == Convolution:
               
               # make sure to change this for experimentation since 'experimental' is a sequential attribute,
@@ -3053,6 +3253,7 @@ class Parallel:
       
       activations  = self.activations
       weighted_sum = self.WS
+      batchsize = kwargs.get('batchsize', 1)
       
       if self.RNN or self.LSTM or self.GRU:
         errors = self.errors[:]
@@ -3086,7 +3287,7 @@ class Parallel:
                 weight_gradient += error_versions[layer_index][branch_index][neuron_index] * prev_activations[weight_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient /= len(errors)
+                weight_gradient /= batchsize
 
               # Update weights
               param_id += 1
@@ -3099,7 +3300,7 @@ class Parallel:
               bias_gradient += error_versions[layer_index][branch_index][neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -3144,7 +3345,7 @@ class Parallel:
               param_id += 1
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient[a][b] /= len(errors)
+                weight_gradient[a][b] /= batchsize
 
               branch.kernel[a][b] = optimize(learning_rate, branch.kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
@@ -3152,7 +3353,7 @@ class Parallel:
             param_id += 1
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             branch.bias = optimize(learning_rate, branch.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
@@ -3168,7 +3369,7 @@ class Parallel:
               weight_gradient += error_versions[layer_index][branch_index][this_neuron_index] * prev_activations[this_neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              weight_gradient /= len(errors)
+              weight_gradient /= batchsize
 
             param_id += 1
             branch.neurons[this_neuron_index]['weight'] = optimize(learning_rate, branch.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -3181,7 +3382,7 @@ class Parallel:
                 bias_gradient += error_versions[layer_index][branch_index][this_neuron_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                bias_gradient /= len(errors)
+                bias_gradient /= batchsize
 
               param_id += 1
               branch.neurons[this_neuron_index]['bias'] = optimize(learning_rate, branch.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -3199,7 +3400,7 @@ class Parallel:
                 weight_gradient += error_versions[layer_index][branch_index][neuron_index] * prev_activations[weight_index]
 
               if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                weight_gradient /= len(errors)
+                weight_gradient /= batchsize
 
               # Update weights
               param_id += 1
@@ -3213,7 +3414,7 @@ class Parallel:
               bias_gradient += error_versions[layer_index][branch_index][neuron_index]
 
             if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              bias_gradient /= len(errors)
+              bias_gradient /= batchsize
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -3232,9 +3433,9 @@ class Parallel:
             B_gradient  += error_version[branch_index][2]
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            Wa_gradient /= len(errors)
-            Wb_gradient /= len(errors)
-            B_gradient  /= len(errors)
+            Wa_gradient /= batchsize
+            Wb_gradient /= batchsize
+            B_gradient  /= batchsize
 
           param_id += 1
           branch.carry_weight = optimize(learning_rate, branch.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -3257,10 +3458,10 @@ class Parallel:
             EXTRA_ERR = [EXTRA_ERR[i] + error_version[branch_index][5][i] for i in range(3)]
             
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            B_ERR     = [a / len(errors) for a in B_ERR]
-            ST_ERR    = [b / len(errors) for b in ST_ERR]
-            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
-            EXTRA_ERR = [d / len(errors) for d in EXTRA_ERR]
+            B_ERR     = [a / batchsize for a in B_ERR]
+            ST_ERR    = [b / batchsize for b in ST_ERR]
+            INPUT_ERR = [c / batchsize for c in INPUT_ERR]
+            EXTRA_ERR = [d / batchsize for d in EXTRA_ERR]
           
           for index, bias in enumerate(branch.biases):
             param_id += 1
@@ -3291,9 +3492,9 @@ class Parallel:
             INPUT_ERR = [INPUT_ERR[i] + error_version[branch_index][3][i] for i in range(3)]
             
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-            B_ERR     = [a / len(errors) for a in B_ERR]
-            C_ERR     = [b / len(errors) for b in C_ERR]
-            INPUT_ERR = [c / len(errors) for c in INPUT_ERR]
+            B_ERR     = [a / batchsize for a in B_ERR]
+            C_ERR     = [b / batchsize for b in C_ERR]
+            INPUT_ERR = [c / batchsize for c in INPUT_ERR]
           
           for index, bias in enumerate(branch.biases):
             param_id += 1
@@ -3425,7 +3626,7 @@ class Datacontainer:
     self.data = data
     self.parallel = kwargs.get('parallel', False)
 
-# neural layers
+# learnable layers
 
 class Convolution:
   def __init__(self, kernel, activation, **kwargs):
@@ -3579,7 +3780,7 @@ class Dense:
     self.output_shape = neurons
     self.activation = activation.lower()
     self.input_shape = kwargs.get('input_shape', 0)
-    self.initialization = kwargs.get('initialization', 'he normal')
+    self.initialization = kwargs.get('initialization', 'he normal').lower()
 
     neuron = {
       'weights': [0],
@@ -3611,10 +3812,12 @@ class Dense:
       raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
 
     # iterate over all the neurons
-    for _neuron in self.neurons:
-      dot_product = sum([input[i] * _neuron['weights'][i] for i in range(len(input))])
-
-      answer.append(Key.ACTIVATION[self.activation](dot_product + _neuron['bias']))
+    answer = [
+    Key.ACTIVATION[self.activation](
+        sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias']
+    )
+    for _neuron in self.neurons
+]
     return answer
 
   def get_weighted_sum(self, input: list):
@@ -3627,11 +3830,12 @@ class Dense:
       raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
 
     # iterate over all the neurons
-    for _neuron in self.neurons:
-      
-      dot_product = sum([input[i] * _neuron['weights'][i] for i in range(len(input))])
-
-      answer.append(dot_product + _neuron['bias'])
+    answer = [
+    (
+        sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias']
+    )
+    for _neuron in self.neurons
+    ]
     return answer
 
 class Localunit:
@@ -3881,7 +4085,7 @@ class LSTM:
     -----
     Args
     -----
-    - (Optional) version   (boolean) : alters the version of the LSTM, 'Statquest' by default
+    - (Optional) version   (boolean) : alters the version of the LSTM, 'Standard' by default
     - (Optional) input     (boolean) : accept an input during propagation, on by default
     - (Optional) output    (boolean) : return anything during propagation, on by default
     - (Optional) learnable (boolean) : whether or not to learn, on by default
@@ -4021,16 +4225,6 @@ class GRU:
     final_output = Key.ACTIVATION["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) + gated_carry
     
     return final_output, gated_carry, merged_state, weighted_input, weighted_carry, input, carry
-  
-class mLSTM: # unimplimented
-  # maybe impliment this sometime in the future when there is a reason to (even if it is just for fun)
-  # but as for right now, its just here as a reminder. refrence at https://www.mdpi.com/2673-2688/5/3/71
-  ...
-  
-class sLSTM: # unimplimented
-  # maybe impliment this sometime in the future when there is a reason to (even if it is just for fun)
-  # but as for right now, its just here as a reminder. refrence at https://www.mdpi.com/2673-2688/5/3/71
-  ...
 
 # Functional layers
 
@@ -4322,3 +4516,51 @@ class Merge:
     
     self.points = len(final_answer)
     return final_answer
+
+class Dropout:
+  def __init__(self, dropout_rate, **kwargs):
+    """
+    Dropout
+    -----
+      Decides how many information passing through it gets dropped, either as a percentage or a fixed number.
+      depending on the method, it will default to independent percentages.
+    -----
+    Args
+    -----
+      dropout_rate      (float)  : the percentage of information to drop
+      (Optional) name   (string) : the name of the layer
+      (Optional) method (string) : the initialization method, defaults to 'independent'
+    ---
+    Initialization methods:
+     - 'independent' : each neurons is dropped independently of eachother in accordance to the dropout rate
+     - 'fixed'       : a fixed number of neurons are dropped in accordance to the dropout rate
+    """
+    
+    if dropout_rate < 0 or dropout_rate > 1:
+      raise ValueError("Dropout rate must be between 0 and 1.")
+    
+    self.dropout_rate = dropout_rate
+    self.name = kwargs.get('name', 'dropout')
+    self.method = kwargs.get('method', 'independent')
+    self.neurons = [0]
+  
+  def apply(self, input):
+      
+    if len(arraytools.shape(input)) == 2:
+      ...
+      
+    else:
+      
+      if self.method == 'fixed':
+        actives = [1 for _ in range( len(input) - int(len(input) * self.dropout_rate) )]
+        self.neurons = [0 for _ in range(len(input) - len(actives))] + actives
+        random.shuffle(self.neurons)
+        
+      elif self.method == 'independent':
+        self.neurons = [1 if random.random() > self.dropout_rate else 0 for _ in range(len(input))]
+      
+      else:
+        raise ValueError(f"Unknown method: '{self.method}', Method must be 'independent' or 'fixed'")
+      
+      return [a * b for a, b in zip(input, self.neurons)]
+  

@@ -50,7 +50,7 @@ def ELU(x, alpha=1.0):
   if x > 0:
     return x
   else:
-    if x<-10:
+    if x < -10:
       return -1
     return alpha * (math.exp(x) - 1)
 

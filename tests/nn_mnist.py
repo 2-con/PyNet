@@ -5,7 +5,7 @@ current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-import api.synapse as ai
+import api.synapse as net
 
 from tools.visual import image_display
 from tools.scaler import argmax
@@ -14,22 +14,22 @@ import matplotlib.pyplot as plt
 
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
 
-model = ai.Sequential( 
+model = net.Sequential( 
                         
-  ai.Flatten(),
-  ai.Dense(128, 'elu'),
-  ai.Dense(32, 'elu'),
-  ai.Dense(32, 'elu'),
-  ai.Dense(10, 'elu'),
-  # ai.Operation('softmax')
+  net.Flatten(),
+  net.Dense(128, 'elu'),
+  net.Dense(32, 'elu'),
+  net.Dense(32, 'elu'),
+  net.Dense(10, 'elu'),
+  net.Operation('softmax')
 )
 
 model.compile(
   optimizer='adam',
-  loss='mean squared error',
+  loss='categorical crossentropy',
   metrics=['accuracy'],
   batchsize = 1,
-  learning_rate=0.001,
+  learning_rate=0.002,
   epochs=100,
 )
 
@@ -52,6 +52,7 @@ print()
 print(f"{argmax(predicted_label) == argmax(train_labels[img_index])}    {argmax(train_labels[img_index])} | {argmax(predicted_label)}")
 
 model.evaluate(test_images[:100], test_labels[:100])
+
 
 plt.plot(range(len(model.error_logs)), model.error_logs)
 plt.title("Model Loss vs Epoch")

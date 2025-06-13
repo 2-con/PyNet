@@ -31,7 +31,7 @@ Contact
 
 __version__ = "1.0.0"
 __package__ = "PyNET"
-__all__ = ["core", "datasets", "models", "tests", "tools", "synapse"]
+__all__ = ["core", "datasets", "models", "tests", "tools", "api"]
 __loader__ = "PyNet"
 
 __liscense__ = "Apache License 2.0"

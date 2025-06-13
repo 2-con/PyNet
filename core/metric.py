@@ -6,7 +6,7 @@ def Accuracy(y_true:list, y_pred:list):
   """
   Accuracy
   -----
-  Returns the accuracy of the model
+    Returns the accuracy of the model
   -----
   Args
   -----
@@ -29,7 +29,7 @@ def Precision(y_true:list, y_pred:list):
   """
   Precision
   -----
-  Returns the precision of the model
+    Returns the precision of the model
   -----
   Args
   -----
@@ -56,7 +56,7 @@ def Recall(y_true:list, y_pred:list):
   """
   Recall
   -----
-  Returns the recall of the model
+    Returns the recall of the model
   -----
   Args
   -----
@@ -83,7 +83,7 @@ def F1_score(y_true:list, y_pred:list):
   """
   F1 Score
   -----
-  Returns the F1 score of the model
+    Returns the F1 score of the model
   -----
   Args
   -----
@@ -103,7 +103,7 @@ def ROC_AUC(y_true:list, y_pred:list):
   """
   ROC AUC
   -----
-  Returns the ROC AUC of the model
+    Returns the ROC AUC of the model
   -----
   Args
   -----
@@ -121,7 +121,7 @@ def Log_Loss(y_true:list, y_pred:list):
   """
   Log Loss
   -----
-  Returns the log loss of the model
+    Returns the log loss of the model
   -----
   Args
   -----
@@ -134,28 +134,11 @@ def Log_Loss(y_true:list, y_pred:list):
   """
   return -sum([true * math.log(pred) + (1 - true) * math.log(1 - pred) for true, pred in zip(y_true, y_pred)]) / len(y_true)
 
-def Root_Mean_Squared_Error(y_true:list, y_pred:list):
-  """
-  Root Mean Squared Error
-  -----
-  Returns the root mean squared error of the model
-  -----
-  Args
-  -----
-  - y_true (list) : the true values
-  - y_pred (list) : the predicted values
-
-  Returns
-  -----
-    (float) : the root mean squared error of the model
-  """
-  return math.sqrt(loss.Mean_squared_error(y_true, y_pred))
-
 def R2_Score(y_true:list, y_pred:list):
   """
   R2 Score
   -----
-  Returns the R2 score of the model
+    Returns the R2 score of the model
   -----
   Args
   -----

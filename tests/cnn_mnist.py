@@ -5,7 +5,7 @@ current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-from api import synapse as ai
+from api import synapse as net
 
 from tools.visual import image_display
 from tools.scaler import argmax
@@ -16,38 +16,88 @@ import matplotlib.pyplot as plt
 train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
 
   
-model = ai.Sequential( 
+model = net.Sequential( 
     
-  ai.Convolution((4,4), 'elu'),
-  ai.Convolution((4,4), 'elu'),
-  ai.Flatten(),
-  ai.Dense(32, 'elu'),
-  ai.Dense(16, 'elu'),
-  ai.Dense(16, 'elu'),
-  ai.Dense(10, 'elu'),
-  ai.Operation('softmax')
+  # net.Parallel(
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  # ),
+  # net.Parallel(
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  # ),
+  # net.Parallel(
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  #   net.Convolution((3,3), 'elu'),
+  # ),
+  # net.Parallel(
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  #   net.Meanpooling(2,2),
+  # ),
+  # net.Merge('concat'),
   
+  net.Convolution((4,4), 'elu'),
+  net.Maxpooling(2,2),
+  net.Convolution((4,4), 'elu'),
+  net.Maxpooling(2,2),
+  net.Flatten(),
+  net.Dense(32, 'elu'),
+  net.Dense(32, 'elu'),
+  net.Dense(10, 'none'),
+  net.Operation('softmax')
 )
 
 model.compile(
   optimizer='adam',
   loss='categorical crossentropy',
   metrics=['accuracy'],
-  batchsize = 1,
-  learning_rate=0.002,
+  batchsize = 64,
+  learning_rate=0.001,
   epochs=100,
 )
 
 model.fit(
-  train_images[:50],
-  train_labels[:50],
-  verbose=2,
+  train_images[:500],
+  train_labels[:500],
+  verbose=4,
   regularity=1
 )
 
 # aesthetics
 
-img_index = 19
+img_index = 67
 image_display(train_images[img_index])
 print("num | true | predicted")
 count = 0

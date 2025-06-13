@@ -5,7 +5,7 @@ setup(
   name='pynet',
   version='1.0.0',
   packages=find_packages(),
-  install_requires=['numpy', 'math', 'random'],
+  install_requires=['numpy', 'math', 'random', 'itertools', 'time', 'matplotlib'],
 
   author='Aufy Mulyadi',
   author_email='72212@jisedu.or.id',

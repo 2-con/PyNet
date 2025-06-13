@@ -1,18 +1,20 @@
 
 
-def train_test_split(data, test_size=0.2):
+def split(data, second_size=0.2):
   """
-  Train/Test Split
+  Split
   -----
-    Splits data into training and testing sets
+    Splits a list into two lists of configurable lengths, 
+    used for splitting data into training and testing sets
   -----
   Args
   -----
-  - test_size (float) : controls how much of the original dataset will go towards testing
+  - second_size (float) : controls how much of the original list will go towards the second list
 
   Returns
   -----
-    (Testing data, Training data)
+    (1st half, second half)
   """
-  train_size = 1 - test_size
-  return data[:int(train_size*len(data))], data[int(train_size*len(data)):]
+  first_size = int((1 - second_size) * len(data))
+  return data[:first_size], data[first_size:]
+
