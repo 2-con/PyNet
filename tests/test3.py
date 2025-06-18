@@ -1,178 +1,214 @@
+# import tensorflow as tf
+# from tensorflow.keras import layers, Model
+
+# def create_unconventional_cnn_model(input_shape=(32, 32, 3)):
+#   """
+#   Creates a TensorFlow Keras model that approximates the user's
+#   custom CNN architecture with spatial concatenation of single-channel outputs.
+
+#   Args:
+#       input_shape (tuple): The shape of the input data (e.g., (32, 32, 3) for CIFAR-10).
+#                             Assuming height, width, and then channels.
+#   Returns:
+#       tf.keras.Model: The constructed Keras model.
+#   """
+#   inputs = tf.keras.Input(shape=input_shape)
+
+#   # --- First "Convolutional Block" ---
+#   # Simulates 5 net.Convolution layers in parallel, each producing 1 channel.
+#   # Each Conv2D operates on the *full input* (e.g., 3 channels for an image)
+#   # but outputs only 1 channel.
+#   conv_outputs_branch1 = []
+#   for i in range(5):
+#     # We give each parallel Conv2D a unique name to differentiate them
+#     conv_output = layers.Conv2D(
+#       filters=1,  # Each net.Convolution produces 1 output channel
+#       kernel_size=(4, 4),
+#       activation='elu',
+#       padding='valid',  # Default padding, reduces spatial dimensions
+#       name=f'conv1_branch_{i+1}'
+#     )(inputs)
+#     conv_outputs_branch1.append(conv_output)
+
+#   # Concatenate the 5 single-channel outputs spatially along the width (axis=2)
+#   # The result is a single feature map with an expanded width.
+#   # Shape: (Batch, H_after_conv, W_after_conv * 5, 1)
+#   merged_output_block1 = layers.concatenate(conv_outputs_branch1, axis=2, name='merge_conv1_spatial')
+
+#   # --- First Max Pooling Layer ---
+#   # Operates on the single (but wide) feature map
+#   pooled_output_block1 = layers.MaxPooling2D(
+#     pool_size=(2, 2),
+#     name='maxpool1'
+#   )(merged_output_block1)
+
+#   # --- Second "Convolutional Block" ---
+#   # Simulates 5 more net.Convolution layers in parallel.
+#   # Each operates on the *single-channel output* of the previous pooling layer.
+#   conv_outputs_branch2 = []
+#   for i in range(5):
+#     conv_output = layers.Conv2D(
+#       filters=1,  # Still producing 1 output channel per "branch"
+#       kernel_size=(4, 4),
+#       activation='elu',
+#       padding='valid',
+#       name=f'conv2_branch_{i+1}'
+#     )(pooled_output_block1) # Input is the single-channel pooled map
+#     conv_outputs_branch2.append(conv_output)
+
+#   # Concatenate the 5 single-channel outputs spatially along the width (axis=2) again
+#   # Shape: (Batch, H_after_conv2, W_after_conv2 * 5, 1)
+#   merged_output_block2 = layers.concatenate(conv_outputs_branch2, axis=2, name='merge_conv2_spatial')
+
+#   # --- Second Max Pooling Layer ---
+#   # Operates on the single (but wide) feature map
+#   pooled_output_block2 = layers.MaxPooling2D(
+#     pool_size=(2, 2),
+#     name='maxpool2'
+#   )(merged_output_block2)
+
+#   # --- Flatten Layer ---
+#   # Converts the 2D feature map into a 1D vector
+#   flattened_output = layers.Flatten(name='flatten')(pooled_output_block2)
+
+#   # --- Dense Layers ---
+#   dense_layer_1 = layers.Dense(64, activation='elu', name='dense_64')(flattened_output)
+#   dense_layer_2 = layers.Dense(32, activation='elu', name='dense_32')(dense_layer_1)
+#   # Final classification layer
+#   outputs = layers.Dense(10, activation='softmax', name='output_softmax')(dense_layer_2)
+
+#   # Create the Keras Model
+#   model = Model(inputs=inputs, outputs=outputs, name="unconventional_cnn_model")
+#   return model
+
+# # --- Example Usage ---
+# # Assuming common image input shape like CIFAR-10
+# input_image_shape = (28, 28, 1) # Height, Width, Channels (e.g., RGB)
+
+# # Create the model
+# model = create_unconventional_cnn_model(input_image_shape)
+
+# # Print a summary of the model's layers and output shapes
+# model.summary()
+
+# # You can now compile and train this model:
+# model.compile(
+#   optimizer='adam',
+#   loss='categorical_crossentropy',
+#   metrics=['accuracy']
+# )
+
+# # Example of dummy data (replace with your actual data)
+# import numpy as np
+
+# import sys
+# import os
+# current_script_dir = os.path.dirname(__file__)
+# pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+# sys.path.append(pynet_root_dir)
+
+# from datasets.image import mnist
+
+# train_images, train_labels, test_images, test_labels = mnist(one_hot=True, normalized=True).load()
+
+# # Example of training (using your original patience and validation split)
+# history = model.fit(
+#   np.array(train_images[:400]),
+#   np.array(train_labels[:400]),
+#   epochs=250,
+#   batch_size=10,
+#   validation_split=0.25,
+#   callbacks=[tf.keras.callbacks.EarlyStopping(patience=10, monitor='val_accuracy', restore_best_weights=True)],
+#   verbose=1 # Changed from 6 to 1 for standard TensorFlow output
+# )
+
+import sys
+import os
+current_script_dir = os.path.dirname(__file__)
+pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
+sys.path.append(pynet_root_dir)
+
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.datasets import make_moons # Using make_moons for example data
+from tools.scaler import argmax
 
-def plot_decision_boundary_for_custom_model(model, X_data: list, y_data: list, title: str = "Decision Boundary"):
+def plot_DBR(model, X_data, y_data, epoch, fig=None, ax=None, title_prefix="Decision Boundary"):
     """
-    Plots the decision boundary of a 2D classification model.
-    This function specifically handles models that:
-    1. Accept input data as a list of lists (e.g., [[f1_1, f2_1], [f1_2, f2_2], ...]).
-    2. Output predictions as a list (e.g., [0, 1, 0, ...] or [0.1, 0.9, 0.2, ...]).
+    Plots the decision boundary of a 2D binary classification model in real-time.
 
     Args:
-        model: A trained classification model instance with a 'predict' method.
-               The 'predict' method should conform to the list-in/list-out interface.
-        X_data (list): A list of data points, where each inner list is [feature1, feature2].
-                       (e.g., [[1.2, 0.5], [-0.3, 2.1], ...])
-        y_data (list): A list of true labels corresponding to X_data.
-                       (e.g., [0, 1, 0, ...])
-        title (str): Title for the plot.
+        model: The pure Python model instance. Must have a `predict_proba` method
+               that takes (N, 2) array and returns (N,) array of probabilities for class 1.
+        X_data (np.ndarray): The 2D input features (shape: n_samples, 2).
+        y_data (np.ndarray): The binary target labels (shape: n_samples,).
+        epoch (int): The current training epoch.
+        plot_interval (int): Plot only every 'plot_interval' epochs.
+                             Set to 1 to plot every epoch.
+        fig (matplotlib.figure.Figure, optional): Existing Figure object to update.
+                                                  If None, a new one is created.
+        ax (matplotlib.axes.Axes, optional): Existing Axes object to update.
+                                             If None, a new one is created.
+        title_prefix (str): Prefix for the plot title.
     """
-    # 1. Convert input lists to NumPy arrays for easier manipulation with numpy/matplotlib
-    X_np = np.array(X_data)
-    y_np = np.array(y_data)
 
-    if X_np.shape[1] != 2:
-        print("Warning: This function is best for 2-feature data. Plotting first two features.")
-        X_plot = X_np[:, :2] # Use only the first two features for plotting
-    else:
-        X_plot = X_np
+    # # Create figure and axes if not provided (for the first plot)
+    # if fig is None or ax is None:
+    #     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # 2. Define a meshgrid (grid of points) to cover the feature space
-    # Determine the range of the features with a small margin
-    x_min, x_max = X_plot[:, 0].min() - 0.5, X_plot[:, 0].max() + 0.5
-    y_min, y_max = X_plot[:, 1].min() - 0.5, X_plot[:, 1].max() + 0.5
+    ax.clear() # Clear the previous plot content for update
 
-    # Create a dense grid of points
-    xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.02), # Step size determines resolution
-                         np.arange(y_min, y_max, 0.02))
+    # Convert input lists to NumPy arrays for matplotlib plotting and calculations
+    X_data_np = np.array(X_data)
+    y_data_np = np.array(y_data)
 
-    # 3. Prepare grid points for your custom model's 'predict' method
-    # Flatten the grid points from xx, yy into a 2D array of (N, 2)
-    grid_points_flat_np = np.c_[xx.ravel(), yy.ravel()]
+    # Define the bounds of the plot based on data, with a small margin
+    x_min, x_max = X_data_np[:, 0].min() - 0.5, X_data_np[:, 0].max() + 0.5
+    y_min, y_max = X_data_np[:, 1].min() - 0.5, X_data_np[:, 1].max() + 0.5
+
+    # Create a meshgrid (NumPy array) for the decision regions
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100),
+                         np.linspace(y_min, y_max, 100))
+    grid_points_np = np.c_[xx.ravel(), yy.ravel()]
+
+    # --- Crucial Adaptation for your model: Process points one by one ---
+    grid_points_list = grid_points_np.tolist() # Convert batch to list of single points
     
-    # Convert this NumPy array into a list of lists, as your model expects
-    grid_points_for_model = grid_points_flat_np.tolist()
+    probabilities_list = []
+    for single_point_list in grid_points_list:
+        # Call model.push for EACH individual point
+        proba = argmax(model.push(single_point_list)) 
+        probabilities_list.append(proba)
+    # --- End of Adaptation ---
 
-    # 4. Get predictions from your custom model
-    # Your model's predict method should be called here
-    raw_predictions_list = model.predict(grid_points_for_model)
+    # Convert the list of probabilities back to a NumPy array for plotting with matplotlib
+    Z_np = np.array(probabilities_list) 
+    Z = Z_np.reshape(xx.shape)
 
-    # 5. Convert predictions list back to a NumPy array for processing with Matplotlib
-    raw_predictions_np = np.array(raw_predictions_list)
+    # Plot the decision regions using contourf
+    ax.contourf(xx, yy, Z, levels=[0, 0.5, 1], cmap=plt.cm.RdBu, alpha=0.6)
 
-    # 6. Interpret model output (probabilities vs. hard labels) and convert to integer class labels
-    Z = None
-    unique_true_classes = np.unique(y_np)
+    # Plot the actual data points
+    # Use y_data_np directly with cmap for correct color mapping of 0s and 1s
+    COLORS = []
+     
+    for C in y_data:
+      if argmax(C) == 0:
+        COLORS.append('r')
+      if argmax(C) == 1:
+        COLORS.append('g')
+      if argmax(C) == 2:
+        COLORS.append('b')
+      
+      
+    scatter = ax.scatter(X_data_np[:, 0], X_data_np[:, 1], c=COLORS, cmap=plt.cm.coolwarm, edgecolors='k', s=20)
+
+    # Add labels and title
+    ax.set_title(f"{title_prefix} (Epoch {epoch})")
+    ax.set_xlabel("Feature 1")
+    ax.set_ylabel("Feature 2")
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
     
-    if raw_predictions_np.ndim == 1:
-        # Case A: Binary classification with single probability output (e.g., [0.1, 0.9, 0.4])
-        if np.issubdtype(raw_predictions_np.dtype, np.floating) and np.all((raw_predictions_np >= 0) & (raw_predictions_np <= 1)):
-            Z = (raw_predictions_np > 0.5).astype(int) # Threshold probabilities at 0.5
-        # Case B: Already hard labels for binary (e.g., [0, 1, 0])
-        else:
-            Z = raw_predictions_np.astype(int)
-    elif raw_predictions_np.ndim == 2:
-        # Case C: Multi-class probabilities (e.g., [[0.1,0.8,0.1],[0.7,0.2,0.1]])
-        if np.issubdtype(raw_predictions_np.dtype, np.floating) and np.all((raw_predictions_np >= 0) & (raw_predictions_np <= 1)):
-            Z = np.argmax(raw_predictions_np, axis=1) # Get the index of the highest probability (the class label)
-        # Case D: Already one-hot encoded or multi-output hard labels (less common for this plotting type)
-        # For simplicity, we'll assume argmax is the right way if 2D float output
-        else:
-             Z = np.argmax(raw_predictions_np, axis=1) # This handles common cases like one-hot hard labels too
-    else:
-        raise ValueError("Model output format not recognized. Expected 1D or 2D array for probabilities or hard labels.")
-    
-    # Reshape the predictions back to the grid shape
-    Z = Z.reshape(xx.shape)
-
-    # 7. Plot the contour/decision regions
-    plt.figure(figsize=(9, 7))
-
-    # Choose colormap based on number of unique classes
-    num_classes = len(unique_true_classes)
-    if num_classes <= 2:
-        cmap_regions = plt.cm.RdYlBu # Good for binary
-        cmap_points = plt.cm.RdYlBu
-    else:
-        # For multi-class, use a colormap that provides distinct colors for each class
-        cmap_regions = plt.cm.get_cmap('viridis', num_classes)
-        cmap_points = plt.cm.get_cmap('viridis', num_classes) # Or 'tab10', 'Set1' etc.
-    
-    # Define levels to ensure clear boundaries for integer classes
-    levels = np.arange(np.min(Z), np.max(Z) + 2) - 0.5 # E.g., for classes 0,1,2, levels will be -0.5, 0.5, 1.5, 2.5
-
-    plt.contourf(xx, yy, Z, alpha=0.8, cmap=cmap_regions, levels=levels)
-
-    # 8. Overlay the original data points
-    plt.scatter(X_plot[:, 0], X_plot[:, 1], c=y_np, cmap=cmap_points,
-                edgecolors='k', s=30, label="True Labels")
-
-    plt.xlabel("Feature 1")
-    plt.ylabel("Feature 2")
-    plt.title(title)
-    plt.xlim(xx.min(), xx.max())
-    plt.ylim(yy.min(), yy.max())
-
-    # Add a colorbar for clarity, especially for multi-class
-    cbar = plt.colorbar(ticks=unique_true_classes, label="Predicted Class")
-    cbar.ax.set_yticklabels([str(int(c)) for c in unique_true_classes]) # Ensure integer labels on colorbar
-
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.show()
-
-
-# --- Example of a Custom Model with List Input/Output Interface ---
-class MyDummyCustomModel:
-    """
-    A placeholder for your actual pure Python neural network.
-    It simulates a simple binary classifier for 2D data.
-    """
-    def __init__(self, threshold=0.5):
-        self.threshold = threshold
-        # In a real model, you'd have trained weights and biases here
-
-    def predict(self, input_list_of_lists: list) -> list:
-        """
-        Predicts probabilities for binary classification or class labels.
-        Accepts a list of lists (data points) and returns a list of outputs.
-        """
-        predictions = []
-        for x1, x2 in input_list_of_lists:
-            # This is where your actual model's forward pass would go.
-            # For this dummy, let's create a simple non-linear boundary (e.g., a circle)
-            # Example: Predict 1 if (x1^2 + x2^2) is less than some radius, else 0
-            radius_squared = x1**2 + x2**2
-            
-            # Return probabilities (for ROC AUC, Log Loss etc.)
-            # Or you could return hard labels directly if your model does that
-            
-            # Let's return probabilities for flexibility
-            if radius_squared < 0.5: # Inside the circle, higher probability for class 1
-                prob_class_1 = 0.9 - np.random.rand() * 0.1 # High prob
-            else: # Outside the circle, lower probability for class 1
-                prob_class_1 = 0.1 + np.random.rand() * 0.1 # Low prob
-            
-            predictions.append(prob_class_1)
-            
-        return predictions
-
-# --- Example Usage with the Custom Model and Generated Data ---
-if __name__ == "__main__":
-    # 1. Generate some non-linear data (e.g., moons)
-    n_samples = 500
-    noise_level = 0.1
-    X_data_list, y_data_list = make_moons(n_samples=n_samples, noise=noise_level, random_state=42)
-    
-    # Convert to standard Python lists for the function's expected input
-    X_data_list = X_data_list.tolist()
-    y_data_list = y_data_list.tolist()
-
-    print(f"Generated {len(X_data_list)} samples.")
-    print(f"First 5 X_data samples: {X_data_list[:5]}")
-    print(f"First 5 y_data samples: {y_data_list[:5]}")
-
-    # 2. Instantiate your custom model (assuming it's already trained or dummy)
-    # For a real scenario, this would be your trained neural network model instance.
-    my_model = MyDummyCustomModel()
-
-    # 3. Plot the decision boundary using the new function
-    plot_decision_boundary_for_custom_model(
-        model=my_model,
-        X_data=X_data_list,
-        y_data=y_data_list,
-        title="Decision Boundary of Custom Model (Moons Data)"
-    )
-
-    
+    # Draw the canvas and pause to allow the plot to update
+    fig.canvas.draw()
+    plt.pause(0.0001) # Small pause to allow GUI to update

@@ -2,10 +2,10 @@ import math
 
 # normalization functions
 def Sigmoid(x):
-  if x < -10.0:
-    return 0.0
-  elif x > 10.0:
-    return 1.0
+  # if x < -50.0:
+  #   return 0.0
+  # elif x > 50.0:
+  #   return 1.0
   return 1 / (1 + math.exp(-x))
 
 def Tanh(x):

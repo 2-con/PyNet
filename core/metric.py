@@ -1,5 +1,6 @@
 import math
-import numpy as np 
+import numpy as np
+from tools.scaler import argmax
 
 def Accuracy(y_true: list, y_pred: list):
   """
@@ -21,9 +22,9 @@ def Accuracy(y_true: list, y_pred: list):
     return 0.0
   correct = 0
   for true, pred in zip(y_true, y_pred):
-    if true == pred:
+    if argmax(true) == argmax(pred):
       correct += 1
-  return correct / len(y_true)
+  return (correct / len(y_true)) * 100
 
 def Precision(y_true: list, y_pred: list):
   """
@@ -44,17 +45,19 @@ def Precision(y_true: list, y_pred: list):
   """
   if not y_true: # Handle empty input case
     return 0.0
+  
   true_positive = 0
   false_positive = 0
 
   for true, pred in zip(y_true, y_pred):
-    if true == 1 and pred == 1: # True Positive
+    if argmax(true) == 1 and argmax(pred) == 1: # True Positive
       true_positive += 1
-    elif true == 0 and pred == 1: # False Positive
+      
+    elif argmax(true) == 0 and argmax(pred) == 1: # False Positive
       false_positive += 1
 
   denominator = true_positive + false_positive
-  return true_positive / denominator if denominator != 0 else 0.0
+  return (true_positive / denominator) * 100 if denominator != 0 else 0.0
 
 def Recall(y_true: list, y_pred: list):
   """
@@ -79,13 +82,13 @@ def Recall(y_true: list, y_pred: list):
   false_negative = 0
 
   for true, pred in zip(y_true, y_pred):
-    if true == 1 and pred == 1: # True Positive
+    if argmax(true) == 1 and argmax(pred) == 1: # True Positive
       true_positive += 1
-    elif true == 1 and pred == 0: # False Negative
+    elif argmax(true) == 1 and argmax(pred) == 0: # False Negative
       false_negative += 1
 
   denominator = true_positive + false_negative
-  return true_positive / denominator if denominator != 0 else 0.0
+  return (true_positive / denominator) * 100 if denominator != 0 else 0.0
 
 def F1_score(y_true: list, y_pred: list):
   """
@@ -104,8 +107,8 @@ def F1_score(y_true: list, y_pred: list):
   -----
     (float) : The F1 score. Returns 0.0 if (Precision + Recall) is zero.
   """
-  precision = Precision(y_true, y_pred)
-  recall = Recall(y_true, y_pred)
+  precision = Precision(y_true, y_pred)/100
+  recall = Recall(y_true, y_pred)/100
 
   denominator = precision + recall
   return 2 * (precision * recall) / denominator if denominator != 0 else 0.0
@@ -225,22 +228,14 @@ def R2_Score(y_true: list, y_pred: list):
   if not y_true or len(y_true) != len(y_pred): # Handle empty or mismatched input
     return 0.0
     
-  # Calculate mean of true values
-  # Using numpy for convenience. If you're avoiding numpy, replace with sum(y_true)/len(y_true)
   mean_y_true = np.mean(y_true) 
 
-  # Total sum of squares (SS_tot)
-  # This measures the total variance in the true values.
   ss_total = sum([(true - mean_y_true)**2 for true in y_true])
-
-  # Residual sum of squares (SS_res)
-  # This measures the variance that the model was unable to explain.
   ss_residual = sum([(true - pred)**2 for true, pred in zip(y_true, y_pred)])
 
   if ss_total == 0:
     # If ss_total is 0, it means all y_true values are identical.
     # In this case, R2 is typically 0 if ss_residual is also 0, or undefined.
-    # Returning 0.0 is a common convention for R2 when y_true is constant.
-    return 0.0 if ss_residual == 0 else -float('inf') # Or 0.0 for consistent pred; -inf if wrong pred
+    return 0.0 if ss_residual == 0 else -1e+10 # Or 0.0 for consistent pred; -inf if wrong pred
   
   return 1 - (ss_residual / ss_total)

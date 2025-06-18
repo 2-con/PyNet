@@ -15,7 +15,7 @@ from core.activation import Sigmoid
 import core.optimizer as optimizer
 import tools.utility as utility
 import random
-from api.synapse import Key
+from api.multinet import Key
 from tools.math import sgn
 import itertools
 import numpy as np

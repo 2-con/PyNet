@@ -1,12 +1,10 @@
 import sys
 import os
-
-# Get the directory of the current script (test.py)
 current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-import api.synapse as net
+import api.multinet as net
 
 import tools.arraytools as tools
 import tools.visual as visual
@@ -19,7 +17,7 @@ import numpy as np
 from core.encoder import OneHotEncoder
 
 start_time = time.perf_counter()
-test = 7
+test = 1
 
 if test == 1: # CNN
 
@@ -79,8 +77,7 @@ elif test == 2: # NN
   training_target   = [[0,1],[1,0],[1,0],[0,1]]
 
   model = net.Sequential(
-    net.Dense(4, activation='elu'),
-    net.Dense(3, activation='elu'),
+    net.Dense(15, activation='elu'),
     net.Dense(2, activation='elu'),
   )
 
@@ -89,13 +86,23 @@ elif test == 2: # NN
     loss='mean squared error', 
     learning_rate=0.01,
     batch_size=1,
-    epochs=50000, 
+    epochs=1000, 
     metrics=['accuracy'],
+    experimental=['track metrics'],
+    verbose=4,
+    logging = 100
   )
   
   model.fit(
     training_features, 
     training_target, 
+  )
+  
+  model.evaluate(
+    training_features, 
+    training_target,
+    verbose=1,
+    logging=True
   )
   
   for feature, target in zip(training_features, training_target):
@@ -236,7 +243,7 @@ elif test == 6: # Paralellization test
   
   training_features = [
     
-    generate_random_array(5,5)
+    generate_random_array(5)
     
   ]
 
@@ -246,15 +253,16 @@ elif test == 6: # Paralellization test
   
   model = net.Sequential( 
     net.Parallel(
-      net.Convolution((3,3), 'elu'),
-      net.Convolution((3,3), 'elu'),
-      net.Convolution((3,3), 'elu'),
-      net.Convolution((3,3), 'elu'),
-      net.Convolution((3,3), 'elu'),
+      net.Dense(5, 'elu'),
+      net.Dense(5, 'elu'),
+      net.Dense(5, 'elu'),
+    ),
+    net.Parallel(
+      net.Dense(5, 'elu'),
+      net.Dense(5, 'elu'),
+      net.Dense(5, 'elu'),
     ),
     net.Merge('total'),
-    net.Flatten(),
-    net.Dense(128, 'elu'),
     net.Dense(10, 'none'),
     net.Operation('softmax')
   )
@@ -266,8 +274,8 @@ elif test == 6: # Paralellization test
     batch_size=1,
     epochs=500,
     metrics=['accuracy'],
-    verbose=4,
-    logging=10
+    verbose=6,
+    logging=100
   )
   
   model.fit(
@@ -278,7 +286,7 @@ elif test == 6: # Paralellization test
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
 
-elif test == 7: # Early Stopping and what not
+elif test == 7: # 1D test
 
   def dataset(num_samples, input_dimensions, output_dimensions, noise_strength):
     """
@@ -395,22 +403,27 @@ elif test == 7: # Early Stopping and what not
 
       return inputs, outputs
 
-  training_features, training_target = dataset(25, 1, 1, 5.3)
+  training_features, training_target = dataset(100, 1, 1, 5.3)
+  
+  # training_features = [
+  #                       [ (x/1)-15 ] 
+  #                       for x in range(30) ]
+  # training_target   = [ 
+  #                       [ x[0]**3 + 4*x[0]**2 - 2*x[0] ] 
+  #                       for x in training_features ]
   
   model = net.Sequential(
-    net.Dense(20, 'softplus', initialization='he normal'),
-    net.Dense(50, 'softplus', initialization='glorot normal'),
-    net.Dense(1, 'none', initialization='he normal'),
+    net.Dense(10, 'elu'),
+    net.Dense(1, 'none'),
   )
 
   model.compile(
     optimizer='adam', 
     loss='mean squared error', 
-    learning_rate=0.001,
+    learning_rate=0.005,
     batch_size=1,
-    epochs=2000, 
+    epochs=10000, 
     metrics=['accuracy'],
-    validation_split=0.1,
     logging=100,
     verbose=4
   )
@@ -423,9 +436,9 @@ elif test == 7: # Early Stopping and what not
   testing_domain = [(x/10)-20 for x in range(400)]
   predicted_values = [model.push([x]) for x in testing_domain]
 
-elif test == 8: # visualizing decision boundaries
+elif test == 8: # 2D test
   
-  from sklearn.datasets import make_moons
+  from sklearn.datasets import make_moons, make_blobs
 
   def plot_decision_boundary(model, X_data, y_data, step_size):
     """
@@ -522,14 +535,15 @@ elif test == 8: # visualizing decision boundaries
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.show()
   
-  training_features, training_target = make_moons(n_samples=300, noise=0.1)
+  training_features, training_target = make_blobs(n_samples=200, n_features=2, centers=3, random_state=0, cluster_std=0.9)
 
   training_features = training_features.tolist()
-  training_target = [ OneHotEncoder(2, x)  for x in training_target.tolist()]
+  training_target = [ OneHotEncoder(3, x)  for x in training_target.tolist()]
   
   model = net.Sequential(
-    net.Dense(10, 'relu', initialization='he normal'),
-    net.Dense(2, 'none'),
+    net.Dense(2, 'leaky relu'),
+    net.Dense(3, 'leaky relu'),
+    net.Dense(3, 'none'),
     net.Operation('softmax')
   )
   
@@ -537,12 +551,11 @@ elif test == 8: # visualizing decision boundaries
     optimizer='adam',
     loss='binary crossentropy',
     learning_rate=0.001,
-    batch_size=32,
-    epochs=250,
-    validation_split=0.1,
+    batch_size=1,
+    epochs=500,
     metrics=['accuracy'],
-    logging=10,
-    verbose=4
+    logging=1,
+    verbose=6
   )
   
   model.fit(

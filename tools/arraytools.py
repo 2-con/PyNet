@@ -5,119 +5,185 @@ A collection of tools for working with arrays, mainly 1D and 2D arrays
 """
   
 import random
+import math
 
 def convolve(matrix, kernel):
-    """
-    Convolve a 2D matrix with a 2D kernel.
-    
-    Args:
-      matrix (list of list of int): The input matrix.
-      kernel (list of list of int): The kernel to convolve with.
-    
-    Returns:
-      list of list of int: The convolved matrix.
-    """
-    m_rows = len(matrix)
-    m_cols = len(matrix[0])
-    k_rows = len(kernel)
-    k_cols = len(kernel[0])
-    
-    # Calculate the dimensions of the output matrix
-    output_rows = m_rows - k_rows + 1
-    output_cols = m_cols - k_cols + 1
-    
-    # Initialize the output matrix with zeros
-    output = [[0] * output_cols for _ in range(output_rows)]
-    
-    # Perform convolution
-    for i in range(output_rows):
-      for j in range(output_cols):
-        for ki in range(k_rows):
-          for kj in range(k_cols):
-            output[i][j] += matrix[i + ki][j + kj] * kernel[ki][kj]
-    
-    return output
-
-def reshape(input, width, height):
   """
-  Reshape
+  Convolve
   -----
-    Reshapes a 2D array and returns a 2D array of specifed dimensions
-    
-    negative values means that the shape will be counted backwards simmilar to
-    string indexing / slicing
+    Convolve a 2D matrix with a 2D kernel.
   -----
   Args
   -----
-  height (int)  : the height of the output
-  width  (int)  : the width of the output
+    matrix (list of list of int): The input matrix.
+    kernel (list of list of int): The kernel to convolve with.
   
   Returns
   -----
-    2D Array
+    list of list of int: The convolved matrix.
   """
-  # pool everything
-  pile = []
-  for row in input:
-    try:
-      for item in row:
-        pile.append(item)
-    except:
-      pile.append(row)
+  m_rows = len(matrix)
+  m_cols = len(matrix[0])
+  k_rows = len(kernel)
+  k_cols = len(kernel[0])
+  
+  # Calculate the dimensions of the output matrix
+  output_rows = m_rows - k_rows + 1
+  output_cols = m_cols - k_cols + 1
+  
+  # Initialize the output matrix with zeros
+  output = [[0] * output_cols for _ in range(output_rows)]
+  
+  # Perform convolution
+  for i in range(output_rows):
+    for j in range(output_cols):
+      for ki in range(k_rows):
+        for kj in range(k_cols):
+          output[i][j] += matrix[i + ki][j + kj] * kernel[ki][kj]
+  
+  return output
 
-  # infer the shape
-  if height < 0:
-    height = (len(pile) // abs(width)) + (height+1)
-
-  if width < 0:
-    width = (len(pile) // abs(height)) + (width+1)
-
-  # reshape the pile
-  answer = []
-  for a in range(height):
-    row = []
-    for b in range(width):
-      try:
-        row.append(pile[0])
-        pile.pop(0)
-      except:
-        raise ValueError(f"Cannot reshape a {shape(input)} matrix into a {width}x{height} matrix")
-
-    answer.append(row[:])
-
-  # check if it can be converted into anything other than a redundant 2D array
-  if len(answer) == 1:
-    return answer[0]
-
-  if len(answer) == 1 and len(answer[0]) == 1:
-    return answer[0][0]
-
-  return answer
-
-def flatten(input):
+def reshape(input_data, new_shape):
   """
-  Flatten
+  Reshape
   -----
-    Flattens any 2D array into a 1D array
+    Reshape an array into a new shape, input array can be any shape and new shape can be any shape as long as 
+    there is enough elements to fill the new shape.
   -----
   Args
   -----
-  input (2D array) : the array to flatten
+  input_data (list)          : The input array to be reshaped.
+  new_shape  (list or tuple) : The desired shape for the reshaped array.
+  
+  Returns
+  -----
+  list: The reshaped array.
+  """
+
+  # --- Main reshape logic starts here ---
+  pile = flatten(input_data)
+  total_elements = len(pile)
+
+  # Convert new_shape to a list for mutable processing
+  new_shape_list = list(new_shape)[::-1]
+  
+  # Handle negative dimension inference
+  num_neg_one = new_shape_list.count(-1)
+  if num_neg_one > 1:
+    raise ValueError("Only one dimension can be inferred (-1)")
+  
+  elif num_neg_one == 1:
+    
+    inferred_dim_index = new_shape_list.index(-1)
+    product_of_known_dims = 1
+    
+    for i, dim in enumerate(new_shape_list):
+      if i != inferred_dim_index:
+        if dim <= 0: # Ensure known dimensions are positive
+          raise ValueError(f"Cannot infer dimension at index {inferred_dim_index} if another dimension is zero or negative: {new_shape}")
+        
+        product_of_known_dims *= dim
+    
+    if product_of_known_dims == 0:
+      
+      # If product is 0, and total_elements is not 0, it's impossible to infer
+      if total_elements != 0:
+        raise ValueError(f"Cannot infer dimension when product of other dimensions is zero, and input is not empty")
+      
+      inferred_value = 0 # If total elements is 0, the inferred dim must be 0
+    
+    elif total_elements % product_of_known_dims != 0:
+      raise ValueError(f"Cannot reshape array of size {total_elements} into shape {new_shape}")
+    
+    else:
+      inferred_value = total_elements // product_of_known_dims
+    
+    new_shape_list[inferred_dim_index] = inferred_value
+
+  # Validate final shape (all dimensions must be positive)
+  for dim in new_shape_list:
+    if dim < 0:
+      raise ValueError(f"Invalid dimension value: {dim} in {new_shape}. Only -1 is allowed for inference")
+          
+  # Calculate expected total elements for the new shape
+  expected_total_elements = 1
+  for dim in new_shape_list:
+    
+    expected_total_elements *= dim
+
+  # Check for size mismatch
+  if expected_total_elements != total_elements:
+    raise ValueError(f"Cannot reshape array of size {total_elements} into shape {tuple(new_shape_list)} (requires {expected_total_elements} elements)")
+
+  # Helper function 3: Recursively build the multidimensional array
+  def build(dim_index, current_pile_index):
+    
+    if dim_index == len(new_shape_list):
+      
+      if len(new_shape_list) == 0: # Reshaping to scalar ()
+        
+        if current_pile_index >= total_elements: # Should not happen if size check is correct
+          raise ValueError("Internal error: Pile exhausted when forming scalar.")
+        
+        return pile[current_pile_index], current_pile_index + 1
+      
+      raise RuntimeError("Unexpected base case in recursive array builder.")
+        
+    elif dim_index == len(new_shape_list) - 1:
+      
+      # Base case: Forming the innermost dimension (e.g., a row in a 2D array, or a vector in a 3D array)
+      size_of_last_dim = new_shape_list[dim_index]
+      segment = pile[current_pile_index : current_pile_index + size_of_last_dim]
+      return segment, current_pile_index + size_of_last_dim
+    
+    else:
+      # Recursive step: Forming a higher-level dimension (a list of sub-arrays)
+      num_sub_arrays = new_shape_list[dim_index]
+      current_dimension_list = []
+      
+      for _ in range(num_sub_arrays):
+        
+        # Recursively build the next lower dimension
+        sub_array, current_pile_index = build(dim_index + 1, current_pile_index)
+        current_dimension_list.append(sub_array)
+      
+      return current_dimension_list, current_pile_index
+
+  # --- Start the recursive array construction ---
+  if len(new_shape_list) == 0: # Target shape is () for a scalar output
+    if total_elements != 1:
+      raise ValueError(f"Cannot reshape array of size {total_elements} into scalar (requires 1 element)")
+    return pile[0]
+      
+  final_reshaped_array, final_pile_index = build(0, 0)
+  
+  # Final check (should ideally be covered by initial total_elements check)
+  if final_pile_index != total_elements:
+    raise RuntimeError("Internal error: Mismatch in elements consumed during recursive reshaping")
+
+  return final_reshaped_array
+  
+def flatten(data):
+  """
+  Flatten
+  -----
+    Flattens any 2D or 3D array into a 1D array
+  -----
+  Args
+  -----
+  input (2D or 3D array) : the array to flatten
   
   Returns
   -----
     1D List
   """
-  answer = []
-  if len(shape(input)) == 2:
-    for layer in input:
-      for element in layer:
-        answer.append(element)
-
+  flattened_list = []
+  if isinstance(data, list):
+    for item in data:
+      flattened_list.extend(flatten(item))
   else:
-    raise TypeError("input must be a 2D array")
-
-  return answer
+    flattened_list.append(data)
+  return flattened_list
 
 def transpose(input):
   """
@@ -150,7 +216,7 @@ def concat(*input):
   -----
   Args
   -----
-    input (2D array) : the array to transpose
+    input (2D array) : the array to horizontally concatenate
   """
   answer = []
   

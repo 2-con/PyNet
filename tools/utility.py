@@ -43,24 +43,28 @@ def progress_bar(iterable, prefix = '', suffix = '', decimals = 1, length = 100,
   -----
     None
   """
-  total = len(iterable)
-  # Progress Bar Printing Function
-  def printProgressBar (iteration):
-    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-    filledLength = int(length * iteration // total)
-    bar = fill * filledLength + empty * (length - filledLength)
-    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+  try:
+    total = len(iterable)
+    # Progress Bar Printing Function
+    def printProgressBar (iteration):
+      percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+      filledLength = int(length * iteration // total)
+      bar = fill * filledLength + empty * (length - filledLength)
+      print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+      # Print New Line on Complete
+      if iteration == total:
+        print()
+    # Initial Call
+    printProgressBar(0)
+    # Update Progress Bar
+    for i, item in enumerate(iterable):
+      yield item
+      printProgressBar(i + 1)
     # Print New Line on Complete
-    if iteration == total:
-      print()
-  # Initial Call
-  printProgressBar(0)
-  # Update Progress Bar
-  for i, item in enumerate(iterable):
-    yield item
-    printProgressBar(i + 1)
-  # Print New Line on Complete
-  print()
+    print()
+  except:
+    print()
+    exit()
 
 def priority(func):
   """
@@ -100,11 +104,3 @@ def check_connection():
     return True
   except Exception:
     return False
-  
-def ignore_case_compare(str1, str2):
-  """
-  Ignore Case Compare
-  -----
-    Case insensitive string comparison
-  """
-  return str1.lower() == str2.lower()

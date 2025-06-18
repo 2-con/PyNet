@@ -1,17 +1,10 @@
 import sys
 import os
-
 current_script_dir = os.path.dirname(__file__)
 pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
 sys.path.append(pynet_root_dir)
 
-from core.utility import split
+from tools.arraytools import generate_random_array as gen
+from tools.visual import numerical_display as prnt
 
-rizz = [1,2,3,4,5,6,7,8,9,10]
-
-skibidi, toilet = split(rizz, 0.8)
-
-print(skibidi)
-print(toilet)
-# print(rizz[:1])
-# print(rizz[1:])
+prnt(gen(2,2,1,1,1))
