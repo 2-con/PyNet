@@ -83,9 +83,6 @@ Optimizer = optimizer.Optimizer # set global object
 
 """ TODO:
 
-  - rework CNN
-  - add L1 and L2 regularization
-
 """
 
 #######################################################################################################
@@ -925,9 +922,14 @@ class Sequential:
         ###################################################################################### TO BE OVERHAULED
         elif type(this_layer) == Convolution:
           
+          updater_total_err = []
+          updater_err = []
+          
           raw_errs = []
           
           for channel, previous_err in zip(this_layer.kernels, prev_errors):
+            
+            updater_err = []
             
             for kernel in channel:
               
@@ -950,20 +952,20 @@ class Sequential:
                       # Accumulate the weighted error
                       smol_err[output_row][output_col] += previous_err[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
 
+              updater_err.append(smol_err)
               raw_errs.append(smol_err)
-          
-          layer_errors = [ arraytools.total(row) for row in arraytools.transpose(raw_errs) ]
-          
-          
-          
-          
-          visual.numerical_display(layer_errors)
-          print()
-          visual.numerical_display(raw_errs)
-          exit()
-          
-          
-          
+            
+            updater_total_err.append(updater_err)
+            
+          # forward pass gradient section
+          for a in range(len(raw_errs)//this_layer.channels):
+            totaled = arraytools.generate_array(this_layer.input_shape[0], this_layer.input_shape[1], value=0)
+            
+            for b in range(a, len(raw_errs), this_layer.input_shape[2]):
+              totaled = arraytools.total(totaled, raw_errs[b])
+
+            layer_errors.append(totaled)
+            
           # if 'BPP_kernel_flip' in self.experimental:
           #   kernel = arraytools.mirror(this_layer.kernel[:], 'X')
           # else:
@@ -984,12 +986,6 @@ class Sequential:
                   
           #         # Accumulate the weighted error
           #         layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
-        
-        
-        
-        
-        
-        
         
         ######################################################################################
         elif type(this_layer) == Flatten:
@@ -1330,7 +1326,7 @@ class Sequential:
       for this_layer_index in reversed(range(len(self.layers))):
 
         layer = self.layers[this_layer_index]
-        prev_activations = activations[this_layer_index]
+        prev_activations = activations[this_layer_index][:]
         this_WS = weighted_sum[this_layer_index]
 
         if type(layer) == Dense and layer.learnable:
@@ -1366,23 +1362,30 @@ class Sequential:
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Convolution and layer.learnable:
+          
+          bias_gradients = arraytools.generate_array(*arraytools.shape(layer.bias), value=0)
+          
+          overall_errors = []
+          
+          for error_versions in errors:
 
+            for channel_index, channel in enumerate(layer.kernels):
+              
+              channel_errors = []
+              
+              if len(arraytools.shape(prev_activations)) == 2:
+                prev_activations = [prev_activations for _ in range(layer.channels)]
+              
+              for kernel_index, (raw_kernel, error, activation) in enumerate(zip(channel, error_versions[this_layer_index], prev_activations)):
 
-          for channel_index, channel in enumerate(layer.kernels):
-            
-            for kernel_index, raw_kernel in enumerate(channel):
-
-              weight_gradient = arraytools.generate_array(len(raw_kernel[0]), len(raw_kernel), value=0)
-              kernel = arraytools.mirror(raw_kernel[::-1], 'Y') # flipped kernel
-              bias_gradient = 0
-
-              for error_versions in errors:
+                weight_gradient = arraytools.generate_array(len(raw_kernel[0]), len(raw_kernel), value=0)
+                kernel = arraytools.mirror(raw_kernel[::-1], 'Y') # flipped kernel
 
                 # Rows of prev_errors (0 to 1)
-                for a in range((len(prev_activations) - len(kernel)) + 1):
+                for a in range((len(activation) - len(kernel)) + 1):
 
                   # Columns of prev_errors (0 to 1)
-                  for b in range((len(prev_activations[0]) - len(kernel[0])) + 1):
+                  for b in range((len(activation[0]) - len(kernel[0])) + 1):
 
                     # Apply the flipped kernel to the corresponding region in layer_errors
                     for kernel_row in range(len(kernel)):
@@ -1395,15 +1398,22 @@ class Sequential:
 
                         derivative = Key.ACTIVATION_DERIVATIVE[layer.activation](this_WS[a][b])
                         
-                        weight_gradient[kernel_row][kernel_col] += prev_activations[conv_row][conv_col] * error_versions[this_layer_index][a][b] * derivative
+                        weight_gradient[kernel_row][kernel_col] += activation[conv_row][conv_col] * error[a][b] * derivative
 
+                # find bias error
                 for row in range(len(error_versions[this_layer_index])):
                   for col in range(len(error_versions[this_layer_index][0])):
-                    bias_gradient += error_versions[this_layer_index][row][col]
+                    bias_gradients[channel_index][kernel_index] += error[row][col]
 
-              bias_gradient /= len(prev_activations)**2
+                bias_gradients[channel_index][kernel_index] /= arraytools.shape(activation)[0] * arraytools.shape(activation)[1]
+                channel_errors.append(weight_gradient)
+              
+              overall_errors.append(channel_errors)
 
-              # update kernel weights
+          # update kernel weights
+          for channel_index,  (channel, channel_error, bias_sublist) in enumerate(zip(layer.kernels, overall_errors, bias_gradients)):
+            for kernel_index, (kernel, kernel_error, bias_err) in enumerate(zip(channel, channel_error, bias_sublist)):
+              
               for a in range(len(kernel)):
                 for b in range(len(kernel[a])):
 
@@ -1412,7 +1422,9 @@ class Sequential:
                   if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
                     weight_gradient[a][b] /= batchsize
 
-                  kernel[a][b] = optimize(learning_rate, kernel[a][b], weight_gradient[a][b], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+                  kernel[a][b] = optimize(learning_rate, kernel[a][b], kernel_error[a][b], self.optimizer_instance, 
+                                          alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, 
+                                          param_id=param_id, timestep=timestep)
 
               if layer.use_bias:
                 param_id += 1
@@ -1420,16 +1432,9 @@ class Sequential:
                 if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
                   bias_gradient /= batchsize
 
-                layer.bias = optimize(learning_rate, layer.bias, bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
-
-
-
-
-
-
-
-
-
+                layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, self.optimizer_instance, 
+                                                                   alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, 
+                                                                   param_id=param_id, timestep=timestep)
 
         elif type(layer) == AFS and layer.learnable:
 

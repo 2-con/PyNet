@@ -14,21 +14,21 @@ targets = generate_random_array(4,3)
 # numerical_display(features)
 # numerical_display(targets)
 
-model = syn.Sequential(
+model = syn.Sequential( # 5x5 -> 3x3 (3) -> 2x2 (2)
   syn.Convolution((3,3), 3, 'none'),
   syn.Convolution((2,2), 2, 'none'),
   syn.Flatten(),
-  syn.Dense(4, 'relu')
+  syn.Dense(4, 'elu')
 )
 
 model.compile(
   loss='mean squared error',
-  epochs = 100,
-  optimizer='default',
+  epochs = 1000,
+  optimizer='adam',  
   metrics=['accuracy'],
   verbose = 4,
-  learning_rate = 0.01,
-  logging = 10
+  learning_rate = 0.02,
+  logging = 100
 )
 
 model.fit(
