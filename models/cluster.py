@@ -3,6 +3,10 @@ Cluster
 =====
 
 """
+
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 class KMeans:
   def fit(self, clusters, points, **kwargs):
     epochs = kwargs.get('epochs', 10)

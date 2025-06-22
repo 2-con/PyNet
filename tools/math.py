@@ -10,10 +10,13 @@ def sgn(x):
   """
   Sign
   -----
-    Returns the sign of a number.
+    Returns the sign of a number. it eitehr returns 1 if the number is positive, -1 if the number is negative, or 0 if the number is 0.
   -----
   Args:
     x (int / float): The number to check the sign of.
+  -----
+  Returns:
+    int: The sign of the number.
   """
   if x > 0:
     return 1
@@ -81,3 +84,40 @@ def manhattan_distance_3d(x1, y1, z1, x2, y2, z2):
   """Calculates the 3D Manhattan distance between two points."""
   return abs(x2 - x1) + abs(y2 - y1) + abs(z2 - z1)
 
+def ackermann(x,y):
+  """
+  Ackermann
+  -----
+    Computes the Ackermann function. this is not a practical tool but rather, an easter egg.
+    be aware that this function notorious for its hyper exponential growth.
+  -----
+  Args:
+    x (int): The first parameter of the Ackermann function.
+    y (int): The second parameter of the Ackermann function.
+  -----
+  Returns:
+    int: The result of the Ackermann function.
+  """
+  if x <= 0:
+    return y + 1
+  elif y <= 0:
+    return ackermann(x-1, 1)
+  else:
+    return ackermann(x-1, ackermann(x, y-1))
+
+def factorial(x):
+  """
+  Factorial
+  -----
+    Computes the factorial of a number.
+  -----
+  Args:
+    x (int): The number to compute the factorial of.
+  -----
+  Returns:
+    int: The factorial of the number.
+  """
+  if x == 0:
+    return 1
+  else:
+    return x * factorial(x-1)

@@ -1,9 +1,5 @@
-import sys
-import os
-
-current_script_dir = os.path.dirname(__file__)
-pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
-sys.path.append(pynet_root_dir)
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import matplotlib.pyplot as plt
 from models.regression import *
@@ -127,13 +123,18 @@ def binary_dataset(num_samples: int, input_dimensions: int, output_dimensions: i
 
 start_time_py = time.perf_counter()
 
-X, Y = binary_dataset(1000, 1, 1, 0.01)
+# a * b^c+x + d
+a = 1
+b = 1 
+d = 0
 
-model = Logistic(1, 1)
+X, Y = [[x] for x in range(10)], [[a * 2.71828**(b*x) + d] for x in range(10)]
+
+model = Exponential(1, 1)
 model.compile(
   optimizer='default',
   loss='mean squared error',
-  learning_rate=0.001,
+  learning_rate=0.00001,
   epochs=1000,
 )
 
@@ -145,8 +146,7 @@ model.fit(
 )
 
 end_time_py = time.perf_counter()
-duration_py = end_time_py - start_time_py
-print(f"Pure Python version trained in: {duration_py:.4f} seconds")
+print(f"Ran in {end_time_py - start_time_py:.4f} seconds")
 
 predicted_line = [model.predict([x]) for x in range(10)]
 

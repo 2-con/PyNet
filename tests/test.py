@@ -1,8 +1,5 @@
-import sys
-import os
-current_script_dir = os.path.dirname(__file__)
-pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
-sys.path.append(pynet_root_dir)
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import api.multinet as net
 

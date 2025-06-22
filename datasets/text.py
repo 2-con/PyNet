@@ -1,4 +1,4 @@
-""" Sunset West by Aufy Mulyadi 2024
+Sunset_West = """
 chapter I
 
 Through the desolate plains of northern France, the wind howled like a thousand wolves. I tightened my cloak, but the flimsy wool offered little protection from the piercing November chill that was clawing at my very soul. Many years spent in Gaul, particularly in this hellhole that is northern France, had made me an experienced veteran of its harsh winters. However, this one seemed... well, different. The once rich earth appeared to be crumbling beneath my very feet, transforming the soil into ashen dirt that suffocated any life that dared venture near it.
@@ -1609,3 +1609,18 @@ Afterword
 
 One of my goals for this project was to create a novella of 20k-30k words. Initially, I'd opted for an alternate-history when the Romans 'discovered' the new world with the main objective being to highlight the reaction of clueless romans describing alien flora and fauna, i was inspired by 'Running out of time' by Margaret Peterson, a story where a girl from centuries ago describe the modern world, i attempted to do the same with Romans and American wildlife
 """
+
+class sunsetwest:
+  def __init__(self, word_count, as_list=True):
+    self.word_count = word_count
+    self.as_list = as_list
+  
+  def load(self):
+    
+    if self.as_list:
+      return [word for word in Sunset_West.split()][:self.word_count]
+    else:
+      return ' '.join([word for word in Sunset_West.split()][:self.word_count])
+
+  def author():
+    return "Sunset West by Aufy Mulyadi 2024"

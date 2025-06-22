@@ -44,7 +44,7 @@ if __name__ == "__main__":
   print("""
         This file is not meant to be run as a main file.
         More information can be found about PyNet's Multinet API on the documentation.
-        'docs.txt' or https://www.pynet.com/api_docs/python/synapse
+        'docs.txt' or https://www.pynet.com/api_docs/python/multinet
         """)
   exit()
 
@@ -52,12 +52,8 @@ if __name__ == "__main__":
 #                                               Imports                                               #
 #######################################################################################################
 
-import sys
-import os
-
-current_script_dir = os.path.dirname(__file__)
-pynet_root_dir = os.path.abspath(os.path.join(current_script_dir, '..'))
-sys.path.append(pynet_root_dir)
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import random
 import numpy as np
