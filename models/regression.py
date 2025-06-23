@@ -7,14 +7,12 @@ Regression
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import math
 from core.activation import Sigmoid
 import core.optimizer as optimizer
 import tools.utility as utility
 from api.synapse import Key
-import random
+import random, numpy as np, math, itertools
 from tools.math import sgn
-import itertools
 
 Optimizer = optimizer.Optimizer # set global object
 
@@ -896,11 +894,13 @@ class Exponential:
       param_id = 0 # must be a positive integer
       
       for neuron_index, neuron in enumerate(self.neurons):
+        
+        total_x = sum([weight * input[weight_index] for weight_index, weight in enumerate(neuron['weights'])])
 
         for weight_index, weight in enumerate(neuron['weights']):
 
           # calculate universal gradient
-          weight_gradient = error[neuron_index] * input[weight_index]
+          weight_gradient = error[neuron_index] * input[weight_index] * neuron['factor'] * math.exp(neuron['factor'] * total_x)
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
@@ -910,7 +910,6 @@ class Exponential:
           neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias, intercept and factor
-        total_x = sum([weight * input[weight_index] for weight_index, weight in enumerate(neuron['weights'])])
         bias_gradient      = error[neuron_index]
         intercept_gradient = error[neuron_index] * 2.71828 ** (neuron['factor'] * total_x)
         factor_gradient    = error[neuron_index] * 2.71828 ** (neuron['factor'] * total_x) * total_x * neuron['intercept']
@@ -977,7 +976,7 @@ class Exponential:
     
     return [
     (
-      _neuron['intercept'] * 2.7182818284590452354 ** ( _neuron['factor'] * sum( input_val * weight_val for input_val, weight_val in zip(point, _neuron['weights']) ) ) + _neuron['bias']
+      _neuron['intercept'] * math.exp( _neuron['factor'] * sum( input_val * weight_val for input_val, weight_val in zip(point, _neuron['weights']) ) ) + _neuron['bias']
     )
     for _neuron in self.neurons
     ]
@@ -1168,11 +1167,13 @@ class Power:
       param_id = 0 # must be a positive integer
       
       for neuron_index, neuron in enumerate(self.neurons):
+        
+        full_x = sum([weight * input[index] for index, weight in enumerate(neuron['weights'])])
 
         for weight_index, weight in enumerate(neuron['weights']):
 
           # calculate universal gradient
-          weight_gradient = error[neuron_index] * input[weight_index]
+          weight_gradient = error[neuron_index] * input[weight_index] * (neuron['exponent'] * full_x ** (neuron['exponent'] - 1))
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
@@ -1181,8 +1182,6 @@ class Power:
           param_id += 1
           neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
-        full_x = sum([weight * input[index] for index, weight in enumerate(neuron['weights'])])
-        
         # Updating bias, multiplier and exponent
         bias_gradient = error[neuron_index]
         multiplier_gradient = error[neuron_index] * full_x ** neuron['exponent']
@@ -1256,4 +1255,234 @@ class Power:
     ]
 
 class Logarithmic:
-  ...
+  def __init__(self, input_size, output_size):
+    """
+    Logarithmic Regression
+    -----
+      Create a multidimentional logarithmic regression model with custom hyperparameters, 
+      following the formula y = a * ln(x) + b
+    -----
+    Args
+    -----
+    - input_size  (int) : number of input features
+    - output_size (int) : number of output features
+    """
+    
+    # defined during compiling
+    self.optimizer      = None
+    self.loss           = None
+    self.metrics        = None
+    self.learning_rate  = None
+    self.epochs         = None
+
+    self.input_size     = input_size
+    self.output_size    = output_size
+    self.error_logs = []
+
+    self.optimizer_instance = Optimizer()
+    
+    self.neurons = [
+      {
+      'weights'   : [random.uniform(-1, 1) for _ in range(input_size)],
+      'multiplier': random.uniform(-1, 1),
+      'bias'      : random.uniform(-1, 1)
+      }
+      for _ in range(output_size)
+    ]
+    
+  def compile(self, optimizer, loss, learning_rate, epochs, **kwargs):
+    """
+    Compile
+    -----
+      Compiles the model to be ready for training.
+      the PyNet commpiler will automatically take care of hyperparameters and fine tuning under the hood
+      unless explicitly defined
+    -----
+    Args
+    -----
+    - optimizer                  (str)   : optimizer to use
+    - loss                       (str)   : loss function to use
+    - metrics                    (list)  : metrics to use
+    - learning_rate              (float) : learning rate to use
+    - epochs                     (int)   : number of epochs to train for
+    - (Optional) batchsize       (int)   : batch size, defaults to 1
+    - (Optional) initialization  (int)   : weight initialization
+    - (Optional) experimental    (str)   : experimental settings to use
+
+    Optimizer hyperparameters
+    -----
+    - (Optional) alpha    (float)
+    - (Optional) beta     (float)
+    - (Optional) epsilon  (float)
+    - (Optional) gamma    (float)
+    - (Optional) delta    (float)
+    -----
+    Optimizers
+    - ADAM        (Adaptive Moment Estimation)
+    - RMSprop     (Root Mean Square Propagation)
+    - Adagrad
+    - Amsgrad
+    - Adadelta
+    - Gradclip    (Gradient Clipping)
+    - Adamax
+    - SGNDescent  (Sign Gradient Descent)
+    - Default     (PyNet descent)
+    - Variational Momentum
+    - Momentum
+    - None        (Gradient Descent)
+
+    Losses
+    - mean squared error
+    - mean abseloute error
+    - total squared error
+    - total abseloute error
+    - categorical crossentropy
+    - binary cross entropy
+    - sparse categorical crossentropy
+    - hinge loss
+
+    """
+    
+    self.optimizer      = optimizer.lower()
+    self.loss           = loss.lower()
+    self.learning_rate  = learning_rate
+    self.epochs         = epochs
+    self.batchsize      = kwargs.get('batchsize', 1)
+    self.experimental   = kwargs.get('experimental', [])
+
+    self.alpha    = kwargs.get('alpha', None) # momentum decay
+    self.beta     = kwargs.get('beta', None)
+    self.epsilon  = kwargs.get('epsilon', None) # zerodivison prevention
+    self.gamma    = kwargs.get('gamma', None)
+    self.delta    = kwargs.get('delta', None)
+    
+    self.is_compiled = True
+    
+  def fit(self, features, targets, **kwargs):
+    """
+    Fit
+    -----
+      Trains the model to fit into the given features and targets. it is reccomended to keep the verbosity to 0, 3 or 4
+      as the progressbar is detrimental to efficiency
+    -----
+    Args
+    -----
+    - features (list)  : the features to use
+    - targets  (list)  : the corresponding targets to use
+
+    - (optional) verbose       (int) : whether to show anything during training
+    - (optional) regularity    (int) : how often to show training stats
+    """
+    def Backpropagate(predicted, target):
+      
+      if self.loss == 'total squared error':
+        errors = [2 * (pred - true) for pred, true in zip(predicted, target)]
+
+      elif self.loss == 'mean abseloute error':
+        errors = [sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
+
+      elif self.loss == 'total abseloute error':
+        errors = [sgn(pred - true) for pred, true in zip(predicted, target)]
+
+      elif self.loss == 'hinge loss':
+        errors = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
+
+      else: # defaults to MSE if loss is ambiguous
+        errors = [((pred - true)) / len(target) for pred, true in zip(predicted, target)]
+      
+      return errors
+    
+    def Update(error, input, timestep, batchsize):
+      
+      alpha = self.alpha
+      beta = self.beta
+      epsilon = self.epsilon
+      gamma = self.gamma
+      delta = self.delta
+
+      optimize = Key.OPTIMIZER.get(self.optimizer)
+      learning_rate = self.learning_rate
+      param_id = 0 # must be a positive integer
+      
+      for neuron_index, neuron in enumerate(self.neurons):
+        
+        full_x = sum([weight * input[index] for index, weight in enumerate(neuron['weights'])])
+
+        for weight_index, weight in enumerate(neuron['weights']):
+
+          # calculate universal gradient
+          weight_gradient = error[neuron_index] * input[weight_index] * (1/full_x)
+
+          if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+            weight_gradient /= batchsize
+
+          # Update weights
+          param_id += 1
+          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        
+        # Updating bias, multiplier and exponent
+        bias_gradient = error[neuron_index]
+        multiplier_gradient = error[neuron_index] * math.log(full_x)
+
+        if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
+          bias_gradient /= batchsize
+          multiplier_gradient /= batchsize
+
+        param_id += 1
+        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+        param_id += 1
+        neuron['multiplier'] = optimize(learning_rate, neuron['multiplier'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+
+    epochs = self.epochs + 1
+    verbose = kwargs.get('verbose', 0)
+    regularity = kwargs.get('regularity', 1)
+    timestep = 0
+    errors = []
+    
+    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if verbose==1 else range(epochs):
+      epoch_loss = 0
+      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)})%", decimals=2, length=70, empty=' ') if verbose==2 else range(0, len(features), self.batchsize):
+
+        for batch_index in range(self.batchsize):
+
+          if base_index + batch_index >= len(features):
+            continue
+
+          activations = self.predict(features[base_index + batch_index])
+          errors.append(Backpropagate(activations, targets[base_index + batch_index]))
+          
+          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+        
+        timestep += 1
+        
+        if 'frozenTS' in self.experimental:
+          timestep = 1
+        
+        for error in errors:
+          Update(error, features[base_index + batch_index], timestep, self.batchsize)
+          
+        errors = []
+
+      self.error_logs.append(epoch_loss)
+
+      if epoch % regularity == 0 and verbose>=3:
+        prefix = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%) "
+        suffix = f"| Loss: {str(epoch_loss):25} |"
+
+        rate = f" ROC: {epoch_loss - self.error_logs[epoch-1] if epoch > 0 else 0}"
+
+        pad = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%) ") - len(prefix))
+        print(prefix + pad + suffix + rate if verbose == 4 else prefix + pad + suffix)
+  
+  def predict(self, point):
+
+    if len(point) != self.input_size:
+      raise ValueError(f"input must have {self.input_size} elements")
+
+    return [
+    (
+      _neuron['multiplier'] * math.log( sum(input_val * weight_val for input_val, weight_val in zip(point, _neuron['weights'])) ) + _neuron['bias']
+    )
+    for _neuron in self.neurons
+    ]

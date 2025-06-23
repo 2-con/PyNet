@@ -132,17 +132,17 @@ X, Y = [[x] for x in range(10)], [[a * 2.71828**(b*x) + d] for x in range(10)]
 
 model = Exponential(1, 1)
 model.compile(
-  optimizer='default',
+  optimizer='adam',
   loss='mean squared error',
-  learning_rate=0.00001,
-  epochs=1000,
+  learning_rate=0.0001,
+  epochs=50000,
 )
 
 model.fit(
   X,
   Y,
   verbose=4,
-  regularity=100
+  regularity=1000
 )
 
 end_time_py = time.perf_counter()
