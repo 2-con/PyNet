@@ -35,6 +35,8 @@ class Linear:
     self.metrics        = None
     self.learning_rate  = None
     self.epochs         = None
+    
+    self.is_compiled = False
 
     self.input_size     = input_size
     self.output_size    = output_size
@@ -68,6 +70,8 @@ class Linear:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -109,6 +113,8 @@ class Linear:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -129,9 +135,6 @@ class Linear:
     -----
     - features (list)  : the features to use
     - targets  (list)  : the corresponding targets to use
-
-    - (optional) verbose       (int) : whether to show anything during training
-    - (optional) regularity    (int) : how often to show training stats
     """
     def Backpropagate(predicted, target):
       
@@ -188,8 +191,8 @@ class Linear:
         neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
@@ -261,6 +264,8 @@ class Polynomial:
     self.learning_rate  = None
     self.epochs         = None
     
+    self.is_compiled = False
+    
     self.input_size_raw = input_size
     self.input_size     = (math.factorial( input_size + degree ) / (math.factorial(degree) * math.factorial( input_size ))) - 1
     self.output_size    = output_size
@@ -294,6 +299,8 @@ class Polynomial:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -335,6 +342,8 @@ class Polynomial:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -414,8 +423,8 @@ class Polynomial:
         neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
@@ -503,6 +512,8 @@ class Logistic:
     self.learning_rate  = None
     self.epochs         = None
     
+    self.is_compiled = False
+    
     degree = kwargs.get('degree', 1)
     self.input_size_raw = input_size
     self.input_size     = (math.factorial( input_size + degree ) / (math.factorial(degree) * math.factorial( input_size ))) - 1
@@ -537,6 +548,8 @@ class Logistic:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -577,6 +590,8 @@ class Logistic:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -671,8 +686,8 @@ class Logistic:
         neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
@@ -759,6 +774,8 @@ class Exponential:
     self.metrics        = None
     self.learning_rate  = None
     self.epochs         = None
+    
+    self.is_compiled = False
 
     self.input_size     = input_size
     self.output_size    = output_size
@@ -797,6 +814,8 @@ class Exponential:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -838,6 +857,8 @@ class Exponential:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -929,8 +950,8 @@ class Exponential:
         neuron['factor'] = optimize(learning_rate, neuron['factor'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
@@ -981,39 +1002,39 @@ class Exponential:
     for _neuron in self.neurons
     ]
 
-class Sinusoidal:
-  # AI made this as an example on what to do
-  # this is not mine
+# class Sinusoidal:
+#   # AI made this as an example on what to do
+#   # this is not mine
 
-  def __init__(self, input_size: int, num_harmonics: int = 1):
-    self.input_size = input_size
-    self.num_harmonics = num_harmonics
-    self.weights = np.zeros((input_size, num_harmonics))
-    self.inner_weights = np.zeros((input_size, num_harmonics))
-    self.inner_biases = np.zeros((input_size, num_harmonics))
-    self.bias = 0
+#   def __init__(self, input_size: int, num_harmonics: int = 1):
+#     self.input_size = input_size
+#     self.num_harmonics = num_harmonics
+#     self.weights = np.zeros((input_size, num_harmonics))
+#     self.inner_weights = np.zeros((input_size, num_harmonics))
+#     self.inner_biases = np.zeros((input_size, num_harmonics))
+#     self.bias = 0
 
-  def fit(self, features, targets, learning_rate: float = 0.01, epochs: int = 1000):
-    for _ in range(epochs):
-      for point, target in zip(features, targets):
-        prediction = self.predict(point)
-        error = target - prediction
-        self.bias += learning_rate * error
-        for i in range(self.input_size):
-          for j in range(self.num_harmonics):
-            self.weights[i, j] += learning_rate * error * math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
-            self.inner_weights[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * point[i]
-            self.inner_biases[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
+#   def fit(self, features, targets, learning_rate: float = 0.01, epochs: int = 1000):
+#     for _ in range(epochs):
+#       for point, target in zip(features, targets):
+#         prediction = self.predict(point)
+#         error = target - prediction
+#         self.bias += learning_rate * error
+#         for i in range(self.input_size):
+#           for j in range(self.num_harmonics):
+#             self.weights[i, j] += learning_rate * error * math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
+#             self.inner_weights[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * point[i]
+#             self.inner_biases[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
 
-  def predict(self, point):
-    if len(point) != self.input_size:
-      raise ValueError(f"point must have {self.input_size} elements")
+#   def predict(self, point):
+#     if len(point) != self.input_size:
+#       raise ValueError(f"point must have {self.input_size} elements")
 
-    weighted_sum = 0
-    for i in range(self.input_size):
-      for j in range(self.num_harmonics):
-        weighted_sum += math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * self.weights[i, j]
-    return weighted_sum + self.bias
+#     weighted_sum = 0
+#     for i in range(self.input_size):
+#       for j in range(self.num_harmonics):
+#         weighted_sum += math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * self.weights[i, j]
+#     return weighted_sum + self.bias
 
 class Power:
   def __init__(self, input_size, output_size):
@@ -1035,6 +1056,8 @@ class Power:
     self.metrics        = None
     self.learning_rate  = None
     self.epochs         = None
+    
+    self.is_compiled = False
 
     self.input_size     = input_size
     self.output_size    = output_size
@@ -1070,6 +1093,8 @@ class Power:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -1111,6 +1136,8 @@ class Power:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -1202,8 +1229,8 @@ class Power:
         neuron['exponent'] = optimize(learning_rate, neuron['exponent'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
@@ -1274,6 +1301,8 @@ class Logarithmic:
     self.metrics        = None
     self.learning_rate  = None
     self.epochs         = None
+    
+    self.is_compiled = False
 
     self.input_size     = input_size
     self.output_size    = output_size
@@ -1308,6 +1337,8 @@ class Logarithmic:
     - (Optional) batchsize       (int)   : batch size, defaults to 1
     - (Optional) initialization  (int)   : weight initialization
     - (Optional) experimental    (str)   : experimental settings to use
+    - (optional) verbose         (int)   : whether to show anything during training
+    - (optional) logging         (int)   : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -1349,6 +1380,8 @@ class Logarithmic:
     self.epochs         = epochs
     self.batchsize      = kwargs.get('batchsize', 1)
     self.experimental   = kwargs.get('experimental', [])
+    self.verbose        = kwargs.get('verbose', 0)
+    self.logging        = kwargs.get('logging', 1)
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -1435,8 +1468,8 @@ class Logarithmic:
         neuron['multiplier'] = optimize(learning_rate, neuron['multiplier'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
-    verbose = kwargs.get('verbose', 0)
-    regularity = kwargs.get('regularity', 1)
+    verbose = self.verbose
+    regularity = self.logging
     timestep = 0
     errors = []
     
