@@ -10,6 +10,7 @@ Provides
   (Learnable layers)
   1. Convolution
   2. Dense
+  3. Localunit
 
   (Utility layers)
   1. Maxpooling
@@ -19,14 +20,13 @@ Provides
   5. AFS (Adaptive Feature Scaler)
   6. Operation (normalization and activation functions)
   
-  (Parallelization / Branching)
-  7. Parallel
-  8. Merge
+  (Architectural layers)
+  1. RecurrentBlock
   
   (Recurrent units)
-  9. Recurrent
-  10. LSTM
-  11. GRU
+  1. Recurrent
+  2. LSTM
+  3. GRU
 
 """
 #######################################################################################################
@@ -63,15 +63,214 @@ from core import derivative as Derivative
 from core import loss as Error
 from core import metric as Metrics
 from core import initialization as Initialization
+
+from core.layers import Convolution, Dense, Localunit, AFS, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
 import core.optimizer as optimizer
 
-Optimizer = optimizer.Optimizer # set global object
+Optimizer = optimizer.Optimizer # initialize the optimizer instance
 
 #######################################################################################################
 #                                               Extra                                                 #
 #######################################################################################################
 
 """ Notes:
+
+KEY class turned to lambda functions to reduce memory usage and speed up the code.
+to be used in a later 'Flash API'
+
+class Key:
+  # --- Helper Functions and Constants (now class-level) ---
+  _EPSILON = 1e-7 # Small constant to prevent log(0) or division by zero
+
+  @staticmethod # Use staticmethod because these don't depend on instance state
+  def _sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+  @staticmethod
+  def _softplus(x):
+    return np.log(1 + np.exp(x))
+
+  @staticmethod
+  def _gelu_approx(x):
+    return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3)))
+
+  # Constants for ELU and SELU activation (ELU_ALPHA is used in ReEU)
+  _ELU_ALPHA = 1.0 # Default alpha for ELU, used in ReEU definition
+  _SELU_ALPHA = 1.6732632423543772848170429916717
+  _SELU_LAMBDA = 1.0507009873554804934193349852946
+
+  # Placeholder parameters for scalers (these would typically come from a fitted scaler object)
+  _SCALER_MEAN = 0.0
+  _SCALER_STD = 1.0
+  _SCALER_MIN_VAL = 0.0
+  _SCALER_MAX_VAL = 1.0
+  _SCALER_MAX_ABS_VAL = 1.0 # Max absolute value in the data
+  _SCALER_MEDIAN = 0.0
+  _SCALER_IQR = 1.0 # Interquartile Range (Q3 - Q1)
+
+  ACTIVATION = {
+    # rectifiers
+    'relu': lambda x: np.maximum(0, x),
+    'softplus': lambda x: Key._softplus(x), # Corrected: Access via Key._softplus
+    'mish': lambda x: x * np.tanh(Key._softplus(x)), # Corrected
+    'swish': lambda x: x * Key._sigmoid(x), # Corrected
+    'leaky relu': lambda x, alpha=0.01: np.maximum(alpha * x, x),
+    'elu': lambda x, alpha=1.0: np.where(x > 0, x, alpha * (np.exp(x) - 1)),
+    'gelu': lambda x: Key._gelu_approx(x), # Corrected
+    'selu': lambda x: Key._SELU_LAMBDA * np.where(x > 0, x, Key._SELU_ALPHA * (np.exp(x) - 1)), # Corrected
+    'reeu': lambda x, alpha=None: np.where(x > 0, x + 1, (alpha if alpha is not None else Key._ELU_ALPHA) * (np.exp(x) - 1) + 1), # Corrected
+    'none': lambda x: x, # Linear activation
+    'tandip': lambda x: x * (np.tanh(x + 1) + 1) / 2, # Custom TANDIP
+
+    # normalization functions
+    'binary step': lambda x: np.where(x >= 0, 1, 0),
+    'softsign': lambda x: x / (1 + np.abs(x)),
+    'sigmoid': lambda x: Key._sigmoid(x), # Corrected
+    'tanh': lambda x: np.tanh(x),
+  }
+
+  ACTIVATION_DERIVATIVE = {
+    # rectifiers
+    'relu': lambda x: np.where(x > 0, 1, 0),
+    'softplus': lambda x: Key._sigmoid(x),
+    'mish': lambda x: np.tanh(Key._softplus(x)) + x * Key._sigmoid(x) * (1 - np.tanh(Key._softplus(x))**2) * Key._sigmoid(x),
+    'swish': lambda x: Key._sigmoid(x) + x * Key._sigmoid(x) * (1 - Key._sigmoid(x)), 
+    'leaky relu': lambda x, alpha=0.01: np.where(x > 0, 1, alpha),
+    'elu': lambda x, alpha=1.0: np.where(x > 0, 1, alpha * np.exp(x)),
+    'gelu': lambda x: 0.5 * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3))) + \
+                      0.5 * x * (1 - np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3))**2) * \
+                      np.sqrt(2 / np.pi) * (1 + 3 * 0.044715 * x**2), # GELU derivative
+    'selu': lambda x: Key._SELU_LAMBDA * np.where(x > 0, 1, Key._SELU_ALPHA * np.exp(x)),
+    'reeu': lambda x, alpha=None: np.where(x > 0, 1, (alpha if alpha is not None else Key._ELU_ALPHA) * np.exp(x)),
+    'none': lambda x: np.ones_like(x), # Derivative of x is 1
+    'tandip': lambda x: (np.tanh(x + 1) + 1) / 2 + x / 2 * (1 - np.tanh(x + 1)**2),
+
+    # normalization functions
+    'binary step': lambda x: 1 - np.tanh(x)**2, # use the tanh derivative for binary step to allow learning
+    'softsign': lambda x: 1 / (1 + np.abs(x))**2,
+    'sigmoid': lambda x: Key._sigmoid(x) * (1 - Key._sigmoid(x)),
+    'tanh': lambda x: 1 - np.tanh(x)**2,
+  }
+
+  SCALER = {
+    'standard scaler': lambda x, mean=None, std=None: (x - (mean if mean is not None else Key._SCALER_MEAN)) / ((std if std is not None else Key._SCALER_STD) + Key._EPSILON), # Corrected
+    'min max scaler': lambda x, min_val=None, max_val=None: (x - (min_val if min_val is not None else Key._SCALER_MIN_VAL)) / ((max_val if max_val is not None else Key._SCALER_MAX_VAL) - (min_val if min_val is not None else Key._SCALER_MIN_VAL) + Key._EPSILON), # Corrected
+    'max abs scaler': lambda x, max_abs_val=None: x / ((max_abs_val if max_abs_val is not None else Key._SCALER_MAX_ABS_VAL) + Key._EPSILON), # Corrected
+    'robust scaler': lambda x, median=None, iqr=None: (x - (median if median is not None else Key._SCALER_MEDIAN)) / ((iqr if iqr is not None else Key._SCALER_IQR) + Key._EPSILON), # Corrected
+    'softmax': lambda x: np.exp(x - np.max(x, axis=-1, keepdims=True)) / np.sum(np.exp(x - np.max(x, axis=-1, keepdims=True)), axis=-1, keepdims=True), # Stable softmax
+  }
+
+  SCALER_DERIVATIVE = {
+    'standard scaler': lambda x, mean=None, std=None: np.ones_like(x) / ((std if std is not None else Key._SCALER_STD) + Key._EPSILON), # Corrected
+    'min max scaler': lambda x, min_val=None, max_val=None: np.ones_like(x) / (((max_val if max_val is not None else Key._SCALER_MAX_VAL) - (min_val if min_val is not None else Key._SCALER_MIN_VAL)) + Key._EPSILON), # Corrected
+    'max abs scaler': lambda x, max_abs_val=None: np.ones_like(x) / ((max_abs_val if max_abs_val is not None else Key._SCALER_MAX_ABS_VAL) + Key._EPSILON), # Corrected
+    'robust scaler': lambda x, median=None, iqr=None: np.ones_like(x) / ((iqr if iqr is not None else Key._SCALER_IQR) + Key._EPSILON), # Corrected
+    # Softmax derivative is more complex; for typical backprop, it's often combined with cross-entropy.
+    # This is the element-wise derivative:
+    'softmax': lambda x: Key.SCALER['softmax'](x) * (1 - Key.SCALER['softmax'](x)), # Corrected: Access SCALER via Key.SCALER
+  }
+
+  ERROR = {
+    # continuous error (y_true and y_pred are typically arrays)
+    'mean squared error': lambda y_true, y_pred: np.mean((y_true - y_pred)**2),
+    'mean abseloute error': lambda y_true, y_pred: np.mean(np.abs(y_true - y_pred)),
+    'total squared error': lambda y_true, y_pred: np.sum((y_true - y_pred)**2),
+    'total abseloute error': lambda y_true, y_pred: np.sum(np.abs(y_true - y_pred)),
+
+    # categorical error (y_true is one-hot or integer labels, y_pred are probabilities/logits)
+    'categorical crossentropy': lambda y_true, y_pred: -np.sum(y_true * np.log(y_pred + Key._EPSILON)), # Corrected
+    # For sparse categorical, y_true is integer labels. This is a common way to handle it:
+    'sparse categorical crossentropy': lambda y_true, y_pred: -np.mean(np.log(y_pred[np.arange(len(y_true)), y_true] + Key._EPSILON)), # Corrected
+    'binary crossentropy': lambda y_true, y_pred: -np.mean(y_true * np.log(y_pred + Key._EPSILON) + (1 - y_true) * np.log(1 - y_pred + Key._EPSILON)), # Corrected
+    'hinge loss': lambda y_true, y_pred: np.mean(np.maximum(0, 1 - y_true * y_pred)), # y_true should be -1 or 1 for hinge loss
+    'l1 loss': lambda y_true, y_pred: np.sum(np.abs(y_true - y_pred)), # Same as total absolute error
+  }
+
+  # --- 6. OPTIMIZER Functions (Conceptual: Core update step, real optimizers are stateful classes) ---
+  # NOTE: Optimizers are typically classes that manage internal state (e.g., moments, past gradients)
+  # and learning rates. These lambdas represent only the *core update rule* given all necessary parameters.
+  # In a real scenario, you would pass these lambdas a specific set of pre-calculated parameters
+  # (e.g., current learning rate, v, m for Adam, etc.) and the gradients.
+  OPTIMIZER = {
+    # SGD-like core update, other optimizers add complexity with adaptive learning rates/moments
+    'adam': lambda weights, grads, lr, m, v, t, beta1=0.9, beta2=0.999, epsilon=None: \
+            (lr * m / (1 - beta1**t)) / (np.sqrt(v / (1 - beta2**t)) + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+    'rmsprop': lambda weights, grads, lr, s, rho=0.9, epsilon=None: \
+                lr * grads / (np.sqrt(s) + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+    'adagrad': lambda weights, grads, lr, G, epsilon=None: \
+                lr * grads / (np.sqrt(G) + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+    'amsgrad': lambda weights, grads, lr, m, v_hat, t, beta1=0.9, beta2=0.999, epsilon=None: \
+                (lr * m) / (np.sqrt(v_hat) + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+    'adadelta': lambda weights, grads, delta_w, E_g_sq, E_dw_sq, rho=0.9, epsilon=None: \
+                  np.sqrt(E_dw_sq + (epsilon if epsilon is not None else Key._EPSILON)) / np.sqrt(E_g_sq + (epsilon if epsilon is not None else Key._EPSILON)) * grads, # Corrected
+    'gradclip': lambda grads, clip_norm=1.0: np.clip(grads, -clip_norm, clip_norm), # For gradient clipping
+    'adamax': lambda weights, grads, lr, m, u, t, beta1=0.9, beta2=0.999, epsilon=None: \
+              (lr * m / (1 - beta1**t)) / (u + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+    'sgnd': lambda weights, grads, lr: -lr * grads, # Simple SGD, conceptually change in weights
+    'default': lambda weights, grads, lr: -lr * grads, # Simple SGD, conceptually change in weights
+    'none': lambda weights, grads, lr: np.zeros_like(weights), # No weight update
+    'rprop': lambda grads, prev_grads, update_values, eta_plus=1.2, eta_minus=0.5, delta_max=50, delta_min=1e-6: \
+              np.where(grads * prev_grads > 0, np.minimum(update_values * eta_plus, delta_max), \
+                      np.where(grads * prev_grads < 0, np.maximum(update_values * eta_minus, delta_min), update_values)), # Update values for Rprop
+    'momentum': lambda grads, lr, velocity, gamma=0.9: lr * grads + gamma * velocity, # Conceptually velocity
+    'novograd': lambda grads, lr, m, v, t, beta1=0.9, beta2=0.999, epsilon=None: \
+                (lr * m / (1 - beta1**t)) / (np.sqrt(v / (1 - beta2**t)) + (epsilon if epsilon is not None else Key._EPSILON)), # Corrected
+  }
+
+  METRICS = {
+    # classification metrics
+    'accuracy': lambda y_true, y_pred: np.mean(y_true == y_pred), # For exact matches (e.g., integer labels or one-hot for class)
+    'precision': lambda y_true, y_pred, pos_label=1: \
+                  np.sum((y_true == pos_label) & (y_pred == pos_label)) / \
+                  (np.sum(y_pred == pos_label) + Key._EPSILON), # Corrected
+    'recall': lambda y_true, y_pred, pos_label=1: \
+              np.sum((y_true == pos_label) & (y_pred == pos_label)) / \
+              (np.sum(y_true == pos_label) + Key._EPSILON), # Corrected
+    'f1 score': lambda y_true, y_pred, pos_label=1: \
+                (2 * Key.METRICS['precision'](y_true, y_pred, pos_label) * Key.METRICS['recall'](y_true, y_pred, pos_label)) / \
+                (Key.METRICS['precision'](y_true, y_pred, pos_label) + Key.METRICS['recall'](y_true, y_pred, pos_label) + Key._EPSILON), # Corrected
+    'roc auc': lambda y_true, y_pred_proba: "Requires scikit-learn's roc_auc_score for robust calculation.", # Not a simple NumPy lambda
+    'r2 score': lambda y_true, y_pred: 1 - (np.sum((y_true - y_pred)**2) / (np.sum((y_true - np.mean(y_true))**2) + Key._EPSILON)), # Corrected
+  }
+
+  INITIALIZATION = {
+    # fan_in, fan_out typically refer to input and output dimensions of the layer
+    # For a weight matrix of shape (fan_in, fan_out)
+    'xavier uniform in': lambda shape: np.random.uniform(
+        low=-np.sqrt(6 / shape[0]), high=np.sqrt(6 / shape[0]), size=shape
+    ),
+    'xavier uniform out': lambda shape: np.random.uniform(
+        low=-np.sqrt(6 / shape[1]), high=np.sqrt(6 / shape[1]), size=shape
+    ),
+    'he uniform': lambda shape: np.random.uniform(
+        low=-np.sqrt(6 / shape[0]), high=np.sqrt(6 / shape[0]), size=shape
+    ),
+    'glorot uniform': lambda shape: np.random.uniform(
+        low=-np.sqrt(6 / (shape[0] + shape[1])), high=np.sqrt(6 / (shape[0] + shape[1])), size=shape
+    ),
+    'lecun uniform': lambda shape: np.random.uniform(
+        low=-np.sqrt(3 / shape[0]), high=np.sqrt(3 / shape[0]), size=shape
+    ),
+
+    'xavier normal in': lambda shape: np.random.normal(
+        loc=0.0, scale=np.sqrt(2 / shape[0]), size=shape
+    ),
+    'xavier normal out': lambda shape: np.random.normal(
+        loc=0.0, scale=np.sqrt(2 / shape[1]), size=shape
+    ),
+    'he normal': lambda shape: np.random.normal(
+        loc=0.0, scale=np.sqrt(2 / shape[0]), size=shape
+    ),
+    'glorot normal': lambda shape: np.random.normal(
+        loc=0.0, scale=np.sqrt(2 / (shape[0] + shape[1])), size=shape
+    ),
+    'lecun normal': lambda shape: np.random.normal(
+        loc=0.0, scale=np.sqrt(1 / shape[0]), size=shape
+    ),
+    
+    'default': lambda shape: np.random.normal(loc=0.0, scale=0.01, size=shape), # Small random normal
+    'none': lambda shape: np.zeros(shape), # Zero initialization
+  }
 
 
 
@@ -507,6 +706,11 @@ class Sequential:
             xWS = layer.get_weighted_sum(x)
             weighted_sums.append(xWS)
           
+          elif type(layer) == RecurrentBlock:
+            
+            layer.internal(1, x)
+            weighted_sums.append(layer.WS)
+          
           else:
             weighted_sums.append(x)
           
@@ -661,10 +865,10 @@ class Sequential:
           ]
 
         elif type(self.layers[-1]) == Flatten: # if its a flatten layer
+          
+          sizex, sizey, sizez = self.layers[-1].input_shape
 
-          sizex, sizey = self.layers[-1].input_shape
-
-          output_layer_errors = arraytools.reshape(initial_gradient[:], sizex, sizey)
+          output_layer_errors = arraytools.reshape(initial_gradient[:], (sizex, sizey, sizez))
 
         elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
           recurrent_output_errors = initial_gradient[:]
@@ -927,7 +1131,7 @@ class Sequential:
           
           raw_errs = []
           
-          for channel, previous_err in zip(this_layer.kernels, prev_errors):
+          for channel_index, (channel, previous_err) in enumerate(zip(this_layer.kernels, prev_errors)):
             
             updater_err = []
             
@@ -950,7 +1154,8 @@ class Sequential:
                       output_col = b + kernel_col
                       
                       # Accumulate the weighted error
-                      smol_err[output_row][output_col] += previous_err[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
+                      
+                      smol_err[output_row][output_col] += previous_err[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[channel_index][a][b])
 
               updater_err.append(smol_err)
               raw_errs.append(smol_err)
@@ -965,28 +1170,7 @@ class Sequential:
               totaled = arraytools.total(totaled, raw_errs[b])
 
             layer_errors.append(totaled)
-            
-          # if 'BPP_kernel_flip' in self.experimental:
-          #   kernel = arraytools.mirror(this_layer.kernel[:], 'X')
-          # else:
-          #   kernel = this_layer.kernel[:]
-
-          # layer_errors = arraytools.generate_array(value=0, *this_layer.input_shape)
-
-          # for a in range(len(layer_errors) - (len(kernel) - 1)):
-          #   for b in range(len(layer_errors[0]) - (len(kernel[0]) - 1)):
-
-          #     # Apply the flipped kernel to the corresponding region in layer_errors
-          #     for kernel_row in range(len(kernel)):
-          #       for kernel_col in range(len(kernel[0])):
-                  
-          #         # Calculate the corresponding position in layer_errors
-          #         output_row = a + kernel_row
-          #         output_col = b + kernel_col
-                  
-          #         # Accumulate the weighted error
-          #         layer_errors[output_row][output_col] += prev_errors[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[a][b])
-        
+          
         ######################################################################################
         elif type(this_layer) == Flatten:
           
@@ -1396,7 +1580,7 @@ class Sequential:
                         conv_row = kernel_row + a
                         conv_col = kernel_col + b
 
-                        derivative = Key.ACTIVATION_DERIVATIVE[layer.activation](this_WS[a][b])
+                        derivative = Key.ACTIVATION_DERIVATIVE[layer.activation](this_WS[channel_index][a][b])
                         
                         weight_gradient[kernel_row][kernel_col] += activation[conv_row][conv_col] * error[a][b] * derivative
 
@@ -1430,7 +1614,8 @@ class Sequential:
                 param_id += 1
 
                 if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                  bias_gradient /= batchsize
+                  # visual.numerical_display(bias_gradients)
+                  bias_gradients = [(b / batchsize for b in a) for a in bias_gradients]
 
                 layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, self.optimizer_instance, 
                                                                    alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, 
@@ -1975,30 +2160,6 @@ class Sequential:
 
       return x
 
-  def peek(self) -> None:
-    """
-    Peek
-    -----
-      returns all the weights and biases of all the layers
-    """
-
-    for layer in range(len(self.layers)):
-      print(f"layer {layer+1}")
-
-      if type(self.layers[layer]) == Convolution:
-        visual.numerical_display(self.layers[layer].kernel, title=f'Kernel bias: {self.layers[layer].bias}')
-      elif type(self.layers[layer]) in (Dense, AFS, Localunit):
-        for index, neuron in enumerate(self.layers[layer].neurons):
-          print("  │")
-          print(f"  ├─ Neuron  {index+1}")
-          print(f"  │  Weights {neuron['weights']}")
-          print(f"  │  Bias    {neuron['bias']}")
-        print("  │")
-        print(f"  └─ Activation Function: {self.layers[layer].activation}")
-      else:
-        print("  └─ No weights to peek")
-      print()
-
   def summary(self, **kwargs) -> None:
     """
     Summary
@@ -2047,7 +2208,7 @@ class Sequential:
     print()
 
 #######################################################################################################
-#                                           Parallel Class                                            #
+#                                          Recurrent Class                                            #
 #######################################################################################################
 
 class RecurrentBlock:
@@ -2118,7 +2279,8 @@ class RecurrentBlock:
     
     def Propagate(input):
 
-      activations = []
+      x = input[:]
+      activations = [x]
       weighted_sums = []
 
       if self.RNN:
@@ -2702,972 +2864,3 @@ class RecurrentBlock:
     
     else:
       raise ValueError("Internal attribute not set.")
-    
-#######################################################################################################
-#                                         Component Classes                                           #
-#######################################################################################################
-
-# learnable layers
-
-class Convolution:
-  def __init__(self, kernel:tuple, channels:int, activation:str, **kwargs):
-    """
-    Convolution
-    -----
-      Convolution layer with valid padding, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - kernel                (width, height) : the kernel to apply, automatically generated
-    - channels              (int)           : the amount of channels to output
-    - activation            (str)           : the activation function
-    - (Optional) bias       (bool)          : weither to use bias, defaults to True
-    - (Optional) learnable  (bool)          : whether or not the kernel is learnable, defaults to True
-    - (Optional) weights    (2D array)      : the kernel to apply, in case the kernel is not learnable
-    - (Optional) name       (str)           : the name of the layer
-    -----
-    Activation functions
-    - ReLU
-    - Softplus
-    - Mish
-    - Swish
-    - Leaky ReLU
-    - ELU
-    - GELU
-    - SELU
-    - ReEU
-    - None
-    - TANDIP
-
-    Normalization functions
-    - Binary Step
-    - Softsign
-    - Sigmoid
-    - Tanh
-    """
-    self.kernel_shape = kernel
-    self.channels = channels
-    
-    self.activation = activation.lower()
-    self.learnable = kwargs.get('learnable', True)
-    self.use_bias = kwargs.get('bias', True)
-    self.bias = [0]
-    self.name = kwargs.get('name', 'convolution')
-    self.input_shape = 0
-
-  def reshape_input_shape(self, input_shape):
-    self.input_shape = input_shape
-    
-    self.kernels = arraytools.generate_random_array(self.kernel_shape[0], self.kernel_shape[1], input_shape[2], self.channels)
-    self.bias = arraytools.generate_random_array(input_shape[2], self.channels) if self.use_bias else arraytools.generate_array(input_shape[2], self.channels, value=0)
-    
-  def apply(self, multichannel_input):
-    
-    multichannel_ans = []
-    
-    if len(arraytools.shape(multichannel_input)) < 3:
-      multichannel_input = [multichannel_input]
-    
-    for channel, bias_sublist in zip(self.kernels, self.bias):
-      
-      raw_ans = []
-      
-      for kernel, input, bias in zip(channel, multichannel_input, bias_sublist):
-        
-        m_rows = len(input)
-        m_cols = len(input[0])
-        k_rows = len(kernel)
-        k_cols = len(kernel[0])
-        
-        # Calculate the dimensions of the output matrix
-        output_rows = (m_rows - k_rows) + 1
-        output_cols = (m_cols - k_cols) + 1
-        
-        # Initialize the output matrix with zeros
-        output = [[0] * output_cols for _ in range(output_rows)]
-        
-        # Perform convolution
-        for i in range(output_rows):
-          for j in range(output_cols):
-            dot_product = 0
-          
-            for ki in range(k_rows):
-              for kj in range(k_cols):
-                
-                dot_product += input[i + ki][j + kj] * kernel[ki][kj]
-        
-            output[i][j] = Key.ACTIVATION[self.activation](dot_product) + bias 
-
-        raw_ans.append(output)
-      
-      multichannel_ans.append(arraytools.total(*raw_ans))
-    
-    return multichannel_ans
-
-  def get_weighted_sum(self, multichannel_input):
-    
-    multichannel_ans = []
-    
-    if len(arraytools.shape(multichannel_input)) < 3:
-      multichannel_input = [multichannel_input]
-    
-    for channel, bias_sublist in zip(self.kernels, self.bias):
-      
-      raw_ans = []
-      
-      for kernel, input, bias in zip(channel, multichannel_input, bias_sublist):
-        
-        m_rows = len(input)
-        m_cols = len(input[0])
-        k_rows = len(kernel)
-        k_cols = len(kernel[0])
-        
-        # Calculate the dimensions of the output matrix
-        output_rows = (m_rows - k_rows) + 1
-        output_cols = (m_cols - k_cols) + 1
-        
-        # Initialize the output matrix with zeros
-        output = [[0] * output_cols for _ in range(output_rows)]
-        
-        # Perform convolution
-        for i in range(output_rows):
-          for j in range(output_cols):
-            dot_product = 0
-          
-            for ki in range(k_rows):
-              for kj in range(k_cols):
-                dot_product += input[i + ki][j + kj] * kernel[ki][kj]
-        
-            output[i][j] = dot_product + bias 
-
-        raw_ans.append(output)
-      
-      multichannel_ans.append(arraytools.total(*raw_ans))
-      
-    return multichannel_ans
-
-class Dense:
-  def __init__(self, neurons:int, activation:str, **kwargs):
-    """
-    Dense (fully connected layer)
-    -----
-      Fully connected perceptron layer, previously reffered as 'feedforward layer', accepts and returns 1D arrays.
-    -----
-    Args
-    -----
-    - neurons                   (int)     : the number of neurons in the layer
-    - activation                (string)  : the activation function
-    - (Optional) initialization (string)  : intialization of the weights, defaults to Glorot uniform
-    - (Optional) learnable      (boolean) : whether or not the layer is learnable, defaults to True
-    - (Optional) name           (string)  : the name of the layer
-    -----
-    Activation functions
-    - ReLU
-    - Softplus
-    - Mish
-    - Swish
-    - Leaky ReLU
-    - ELU
-    - GELU
-    - SELU
-    - ReEU
-    - None
-    - TANDIP
-
-    Normalization functions
-    - Binary Step
-    - Softsign
-    - Sigmoid
-    - Tanh
-    
-    Initialization
-    - Xavier uniform in
-    - Xavier uniform out
-    - He uniform
-    - Glorot uniform
-    - LeCun uniform
-    - He normal
-    - Glorot normal
-    - LeCun normal
-    - Default
-    - None
-    """
-    self.output_shape = neurons
-    self.activation = activation.lower()
-    self.input_shape = kwargs.get('input_shape', 0)
-    
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
-      default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
-      default_initializer = 'glorot normal'
-    else:
-      raise ValueError(f"Unknown activation function: '{activation}'")
-    
-    self.initialization = kwargs.get('initialization', default_initializer).lower()
-
-    neuron = {
-      'weights': [0],
-      'bias': 0
-      }
-
-    self.neurons = [neuron for _ in range(neurons)]
-
-    self.learnable = kwargs.get('learnable', True)
-    self.name = kwargs.get('name', 'dense')
-
-  def reshape_input_shape(self, input_shape, output_shape):
-    
-    self.neurons = [
-      {
-      'weights': [Key.INITIALIZATION[self.initialization](input_shape, output_shape) for _ in range(input_shape)],
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape)
-      }
-      for _ in range(self.output_shape)
-    ]
-
-  def apply(self, input: list):
-    self.input = input
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
-
-    # iterate over all the neurons
-    answer = [
-    Key.ACTIVATION[self.activation](
-        sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias']
-    )
-    for _neuron in self.neurons
-]
-    return answer
-
-  def get_weighted_sum(self, input: list):
-    self.input = input[:]
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
-
-    # iterate over all the neurons
-    answer = [
-    (
-        sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias']
-    )
-    for _neuron in self.neurons
-    ]
-    return answer
-
-class Localunit:
-  def __init__(self, receptive_field:int, activation:str, **kwargs):
-    """
-    Local Unit
-    -----
-      Locally connected perceptron layer, accepts and returns 1D arrays.
-      a constituent layer within a LCN (Locally connected networks), also known as a 'LCN' (Locally connected neurons).
-    -----
-    Args
-    -----
-    - receptive_field         (int)     : the receptive field of the layer
-    - activation              (string)  : the activation function
-    - (Optional) learnable    (boolean) : whether or not the layer is learnable, defaults to True
-    - (Optional) name         (string)  : the name of the layer
-    -----
-    Activation functions
-    - ReLU
-    - Softplus
-    - Mish
-    - Swish
-    - Leaky ReLU
-    - ELU
-    - GELU
-    - SELU
-    - ReEU
-    - None
-    - TANDIP
-
-    Normalization functions
-    - Binary Step
-    - Softsign
-    - Sigmoid
-    - Tanh
-    
-    Initialization
-    - Xavier uniform in
-    - Xavier uniform out
-    - He uniform
-    - Glorot uniform
-    - LeCun uniform
-    - He normal
-    - Glorot normal
-    - LeCun normal
-    - Default
-    - None
-    """
-    self.receptive_field = receptive_field
-    self.activation = activation
-    self.name = kwargs.get('name', 'local unit')
-    self.learnable = kwargs.get('learnable', True)
-    
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
-      default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
-      default_initializer = 'glorot normal'
-    else:
-      raise ValueError(f"Unknown activation function: '{activation}'")
-    
-    self.initialization = kwargs.get('initialization', default_initializer).lower()
-
-    self.input_shape = kwargs.get('input_shape', 0)
-    self.output_shape = 0 # will get calibrated soon
-
-    neuron = {
-      'weights': [0],
-      'bias': 0
-      }
-
-    self.neurons = [neuron] # will be calibrated soon
-
-    self.learnable = kwargs.get('learnable', True)
-    self.name = kwargs.get('name', 'unnamed_network')
-
-  def reshape_input_shape(self, input_shape, next_shape):
-
-    self.output_shape = input_shape - (self.receptive_field - 1)
-    
-    self.neurons = [
-      {
-      'weights': [Key.INITIALIZATION[self.initialization](input_shape, next_shape) for _ in range(self.receptive_field)],
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, next_shape)
-      }
-      for _ in range(self.output_shape)
-    ]
-
-  def apply(self, input: list):
-    self.input = input
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
-
-    # iterate over all the neurons
-    for a in range((len(self.neurons) - self.receptive_field) + 1):
-      dot_product = 0
-
-      # iterate over the input
-      for b in range(self.receptive_field):
-
-        dot_product += input[a + b] * self.neurons[a]['weights'][b]
-
-      answer.append(Key.ACTIVATION[self.activation](dot_product + self.neurons[a]['bias']))
-    return answer
-
-  def get_weighted_sum(self, input: list):
-    self.input = input
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
-
-    # iterate over all the neurons
-    for a in range((len(self.neurons) - self.receptive_field) + 1):
-      dot_product = 0
-
-      # iterate over the input
-      for b in range(self.receptive_field):
-
-        dot_product += input[a + b] * self.neurons[a]['weights'][b]
-
-      answer.append(dot_product + self.neurons[a]['bias'])
-    return answer
-
-class AFS:
-  def __init__(self, activation:str, **kwargs):
-    """
-    Adaptive Feature Scaler
-    -----
-      Experimental layer, use a 'None' activation function for a traditional AFS layer, else its no longer
-      a scaler layer anymore.
-    -----
-    Args
-    -----
-    - activation           (string)  : the activation function to use for the attention layer
-    - (Optional) bias      (boolean) : whether or not to use bias
-    - (Optional) learnable (boolean) : whether or not to learn
-    - (Optional) name      (string)  : the name of the layer
-    -----
-      (Activation functions)
-      - ReLU
-      - Softplus
-      - Mish
-      - Swish
-      - Leaky ReLU
-      - ELU
-      - GELU
-      - SELU
-      - ReEU
-      - None
-      - TANDIP
-
-      (Normalization functions)
-      - Binary Step
-      - Softsign
-      - Sigmoid
-      - Tanh
-      
-      Initialization
-      - Xavier uniform in
-      - Xavier uniform out
-      - He uniform
-      - Glorot uniform
-      - LeCun uniform
-      - He normal
-      - Glorot normal
-      - LeCun normal
-      - Default
-      - None
-    """
-    self.activation = activation.lower()
-    self.name = kwargs.get('name', 'feature scaler')
-    self.learnable = kwargs.get('learnable', True)
-    self.use_bias = kwargs.get('bias', True)
-    
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
-      default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
-      default_initializer = 'glorot normal'
-    else:
-      raise ValueError(f"Unknown activation function: '{activation}'")
-    
-    self.initialization = kwargs.get('initialization', default_initializer).lower()
-
-    neuron = {
-      'weight': 0,
-      'bias': 0
-      }
-    self.neurons = [neuron]
-
-  def reshape_input_shape(self, input_shape, output_shape):
-
-    self.neurons = [
-      {
-      'weight': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape)
-      }
-      for _ in range(input_shape)
-    ]
-
-  def apply(self, input):
-
-    return [Key.ACTIVATION[self.activation](self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias']) for i in range(len(input))]
-
-  def get_weighted_sum(self, input: list):
-    self.input = input[:]
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before an AFS layer")
-
-    return [self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias'] for i in range(len(input))]
-
-class Recurrent:
-  def __init__(self, activation:str, **kwargs):
-    """
-    Recurrent Unit
-    -----
-      Primary block within RNNs (Recurrent Neural Networks). it is only compatible with other Recurrent Unit.
-    -----
-    Args
-    -----
-    - activation           (string)  : the activation function to use for the attention layer
-    - (Optional) input     (boolean) : accept an input during propagation, on by default
-    - (Optional) output    (boolean) : return anything during propagation, on by default
-    - (Optional) learnable (boolean) : whether or not to learn, on by default
-    - (Optional) name      (string)  : the name of the layer
-    """
-    self.activation = activation
-    
-    self.accept_input = kwargs.get('input', True)
-    self.return_output = kwargs.get('output', True)
-    
-    self.name = kwargs.get('name', 'recurrent')
-    self.learnable = kwargs.get('learnable', True)
-    
-    self.input_weight = random.uniform(0.1, 1)
-    self.carry_weight = random.uniform(0.1, 1)
-    self.bias = random.uniform(-0.5, 0.5)
-  
-  def apply(self, input, carry):
-    
-    return Key.ACTIVATION[self.activation]((input * self.input_weight) + (carry * self.carry_weight) + self.bias)
-
-  def get_weighted_sum(self, input, carry):
-    
-    return (input * self.input_weight) + (carry * self.carry_weight) + self.bias
-
-class LSTM:
-  def __init__(self, **kwargs):
-    """
-    Long Short Term Memory (LSTM)
-    -----
-      Simmilar to the recurrent unit, but it has a long term memory and this, it is only compatible with other LSTMs.
-      it is not copatible with Gated Recurrent Unit (GRU) or Recurrent Unit (RNN) since they only have 1 state.
-    -----
-    Args
-    -----
-    - (Optional) version   (boolean) : alters the version of the LSTM, 'Standard' by default
-    - (Optional) input     (boolean) : accept an input during propagation, on by default
-    - (Optional) output    (boolean) : return anything during propagation, on by default
-    - (Optional) learnable (boolean) : whether or not to learn, on by default
-    - (Optional) name      (string)  : the name of the layer
-    -----
-      Versions
-    -----
-      - Standard (default) : the standard LSTM, the output is not scaled and thus, have a range of -1 to 1
-      - Statquest : an LSTM architechture that is proposed by Statquest, it scales the 
-                    output by independent weights, allowing it to have a range of -infinity to infinity
-    """
-    
-    self.name = kwargs.get('name', 'LSTM')
-    self.accept_input = kwargs.get('input', True)
-    self.return_output = kwargs.get('output', True)
-    self.learnable = kwargs.get('learnable', True)
-    self.version = kwargs.get('version', 'standard').lower()
-    
-    STW_RANGE  = 1.0
-    INP_RANGE  = 1
-    BIAS_RANGE = 0
-    EXW_RANGE  = 1.0
-    
-    self.short_term_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 4
-    self.input_weights      = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 4
-    self.biases             = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 4
-    self.extra_weights      = [random.uniform(-EXW_RANGE,  EXW_RANGE) ] * 3 if self.version == 'statquest' else [1, 1, 1]
-  
-  def apply(self, input, long_term, short_term):
-    
-    # calculate the merged state
-    
-    weighted_input = [input * self.input_weights[i] for i in range(4)]
-    weighted_short_term = [short_term * self.short_term_weights[i] for i in range(4)]
-    
-    merged_state = [weighted_input[i] + weighted_short_term[i] + self.biases[i] for i in range(len(weighted_input))]
-
-    # process the forget gate
-    gated_long_term = Key.ACTIVATION["sigmoid"](merged_state[0]) * long_term
-    
-    # process the input gate
-    final_long_term = (Key.ACTIVATION["sigmoid"](merged_state[1]) * Key.ACTIVATION["tanh"](merged_state[2])) + gated_long_term
-    
-    # process the output gate
-    final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
-
-    # return the final long term and short term states
-    return final_long_term, final_short_term
-  
-  def get_weighted_sum(self, input, long_term, short_term):
-    # calculate the merged state
-    
-    weighted_input = [input * self.input_weights[i] for i in range(4)]
-    weighted_short_term = [short_term * self.short_term_weights[i] for i in range(4)]
-    
-    merged_state = [weighted_input[i] + weighted_short_term[i] + self.biases[i] for i in range(len(weighted_input))]
-
-    # process the forget gate
-    gated_long_term = Key.ACTIVATION["sigmoid"](merged_state[0]) * long_term
-    
-    # process the input gate
-    final_long_term = (Key.ACTIVATION["sigmoid"](merged_state[1]) * Key.ACTIVATION["tanh"](merged_state[2])) + gated_long_term
-    
-    # process the output gate
-    final_short_term = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * self.extra_weights[0] * self.extra_weights[1] * self.extra_weights[2]
-    
-    # return the final long term and short term states
-    return long_term, short_term, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term
-  
-class GRU:
-  def __init__(self, **kwargs):
-    """
-    Gated Recurrent Unit (GRU)
-    -----
-      Simmilar to recurrent units, just more intricate and thus, is also compatible with the recurrent unit.
-      it is not copatible with Long Short Term Memory (LSTM) cells.
-      
-      unlike other recurrent units, GRU cells output a range from -1 to 1
-    -----
-    Args
-    -----
-    - activation           (string)  : the activation function to use for the attention layer
-    - (Optional) input     (boolean) : accept an input during propagation, on by default
-    - (Optional) output    (boolean) : return anything during propagation, on by default
-    - (Optional) learnable (boolean) : whether or not to learn, on by default
-    - (Optional) name      (string)  : the name of the layer
-    """
-    
-    self.name = kwargs.get('name', 'recurrent')
-    self.accept_input = kwargs.get('input', True)
-    self.return_output = kwargs.get('output', True)
-    self.learnable = kwargs.get('learnable', True)
-    
-    STW_RANGE  = 1.0
-    INP_RANGE  = 0.75
-    BIAS_RANGE = 0
-    
-    self.carry_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 3
-    self.input_weights = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 3
-    self.biases        = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 3
-
-  def apply(self, input, carry):
-    
-    # merging the input and carry states
-    
-    weighted_input = [input * self.input_weights[i] for i in range(3)]
-    weighted_carry = [carry * self.carry_weights[i] for i in range(2)]
-    merged_state = [weighted_input[i] + weighted_carry[i] + self.biases[i] for i in range(2)]
-    
-    # calculating the final merged state
-    weighted_carry.append(Key.ACTIVATION["sigmoid"](merged_state[0]) * carry * self.carry_weights[2])
-    merged_state.append(weighted_input[2] + weighted_carry[2] + self.biases[2])
-    
-    # processes
-    
-    gated_carry = Key.ACTIVATION["sigmoid"](merged_state[1]) * carry
-    
-    final_output = Key.ACTIVATION["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) + gated_carry
-    
-    return final_output
-
-  def get_weighted_sum(self, input, carry):
-    # merging the input and carry states
-    
-    weighted_input = [input * self.input_weights[i] for i in range(3)]
-    weighted_carry = [carry * self.carry_weights[i] for i in range(2)]
-    merged_state = [weighted_input[i] + weighted_carry[i] + self.biases[i] for i in range(2)]
-    
-    # calculating the final merged state
-    weighted_carry.append(Key.ACTIVATION["sigmoid"](merged_state[0]) * carry * self.carry_weights[2])
-    merged_state.append(weighted_input[2] + weighted_carry[2] + self.biases[2])
-    
-    # processes
-    
-    gated_carry = Key.ACTIVATION["sigmoid"](merged_state[1]) * carry
-    
-    final_output = Key.ACTIVATION["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) + gated_carry
-    
-    return final_output, gated_carry, merged_state, weighted_input, weighted_carry, input, carry
-
-# Functional layers
-
-class Maxpooling:
-  def __init__(self, size, stride, **kwargs):
-    """
-    Meanpooling
-    -----
-      Scales down any 2D array by pooling, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - size            (int)    : the size of the pooling window 
-    - stride          (int)    : the stride of the pooling window
-    - (Optional) name (string) : the name of the layer
-    """
-    self.size = size
-    self.stride = stride
-    self.name = kwargs.get('name', 'maxpooling')
-    self.input_size = 0
-
-  def apply(self, input_channels):
-    multichannel_ans = []
-    answer = []
-    self.input_size = arraytools.shape(input)
-
-    for input in input_channels:
-      # iterate over all the layers
-      for a in range(0, len(input), self.stride):
-
-        layer_output = []
-
-        # iterate over all the elements in the layer
-        for b in range(0, len(input[a]), self.stride):
-          pool = []
-
-          # control the vertical
-          for c in range(self.size):
-
-            # control the horizontal
-            for d in range(self.size):
-
-              if a+c < len(input) and b+d < len(input[a]):
-                pool.append(input[a+c][b+d])
-
-          layer_output.append( max(pool) )
-
-        answer.append(layer_output[:])
-      multichannel_ans.append(answer)
-
-    return multichannel_ans
-
-class Meanpooling:
-  def __init__(self, size, stride, **kwargs):
-    """
-    Meanpooling
-    -----
-      Scales down any 2D array by pooling, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - size            (int)  : the size of the pooling window
-    - stride          (int)  : the stride of the pooling window
-    - (optional) name (string) : the name of the layer
-    """
-    self.size = size
-    self.stride = stride
-    self.name = kwargs.get('name', 'meanpooling')
-    self.input_size = 0
-
-  def apply(self, input_channels):
-    multichannel_ans = []
-    answer = []
-    self.input_size = arraytools.shape(input)
-
-    for input in input_channels:
-      # iterate over all the layers
-      for a in range(0, len(input), self.stride):
-
-        layer_output = []
-
-        # iterate over all the elements in the layer
-        for b in range(0, len(input[a]), self.stride):
-          pool = []
-
-          # control the vertical
-          for c in range(self.size):
-
-            # control the horizontal
-            for d in range(self.size):
-
-              if a+c < len(input) and b+d < len(input[a]):
-                pool.append(input[a+c][b+d])
-
-          layer_output.append( sum(pool) / len(pool) )
-
-        answer.append(layer_output[:])
-      multichannel_ans.appen(answer)
-
-    return multichannel_ans
-
-class Flatten:
-  def __init__(self, **kwargs):
-    """
-    Flatten
-    -----
-      Flattens any 2D array into a 1D array, use this layer before a neural network layer (Dense layer)
-    -----
-    Args
-    -----
-    - (optional) name (string): the name of the layer
-    """
-    self.name = kwargs.get('name', 'flatten')
-    self.neurons = [0]
-    self.input_shape = 0
-
-  def apply(self, input):
-    
-    self.input_shape = arraytools.shape(input)
-    
-    return arraytools.flatten(input)
-
-  def set_length(self, length):
-    self.neurons = [0 for _ in range(length)]
-
-class Reshape:
-  def __init__(self, width, height, **kwargs):
-    """
-    Reshape
-    -----
-      Reshapes an array, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - height (int)  : the height of the output
-    - width (int)   : the width of the output
-    - (Optional) name (string) : the name of the layer
-    -----
-    negative values means that the shape will be inferred, essencially counting backwards just
-    like how the python range function works
-    """
-    self.height = height
-    self.width = width
-    self.name = kwargs.get('name', 'reshape')
-    self.input_shape = 0
-
-  def apply(self, input):
-    self.input_shape = arraytools.shape(input)
-    return arraytools.reshape(input, self.width, self.height)
-
-class Operation:
-  def __init__(self, operation, **kwargs):
-    """
-    Operation
-    -----
-      Operational layer for functions or normalizations.
-    -----
-    Args
-    -----
-    - operation    (string) : the scaler to use
-    - (Optional) name   (string) : the name of the layer
-    -----
-    Available Operations:
-
-      (Scalers)
-      - standard scaler
-      - min max scaler
-      - max abs scaler
-      - robust scaler
-
-      (Activation functions)
-      - ReLU
-      - Softplus
-      - Mish
-      - Swish
-      - Leaky ReLU
-      - ELU
-      - GELU
-      - SELU
-      - ReEU
-      - None
-      - TANDIP
-
-      (Normalization functions)
-      - Binary Step
-      - Softsign
-      - Sigmoid
-      - Tanh
-      - Softmax
-    """
-    self.operation = operation.lower()
-    self.name = kwargs.get('name', 'operation')
-
-    self.minimum = 0
-    self.maximum = 0
-    self.q1 = 0
-    self.q3 = 0
-    self.std = 0
-
-    self.neurons = [0]
-
-  def reshape_input_shape(self, input_shape, output_shape):
-
-    self.neurons = [0 for _ in range(input_shape)]
-
-  def apply(self, input):
-
-    if self.operation == 'dropout':
-      # Placeholder for dropout mechanism
-      pass
-
-    # activation functions
-    if self.operation in Key.ACTIVATION:
-      return [Key.ACTIVATION[self.operation](a) for a in input]
-
-    # if its a minmax scaler
-    if self.operation == 'min max scaler':
-
-      self.minimum = min(input)
-      self.maximum = max(input)
-
-      return scaler.min_max_scaler(input, min=self.minimum, max=self.maximum)
-
-    # defaults to a scaler
-    if self.operation in Key.SCALER:
-
-      self.q1 = float(np.percentile(input, 25))
-      self.q3 = float(np.percentile(input, 75))
-      self.std = float(np.std(input))
-
-      return Key.SCALER[self.operation](input)
-
-  def get_weighted_sum(self, x):
-    return x
-
-class Dropout:
-  def __init__(self, dropout_rate, **kwargs):
-    """
-    Dropout
-    -----
-      Decides how many information passing through it gets dropped, either as a percentage or a fixed number.
-      depending on the method, it will default to independent percentages.
-    -----
-    Args
-    -----
-      dropout_rate      (float)  : the percentage of information to drop
-      (Optional) method (string) : the initialization method, defaults to 'independent'
-      (Optional) scaled (bool)   : wether to inversely scale activated values, default to True
-      (Optional) name   (string) : the name of the layer
-    ---
-    Initialization methods:
-     - 'independent' : each neurons is dropped independently of eachother in accordance to the dropout rate
-     - 'fixed'       : a fixed number of neurons are dropped in accordance to the dropout rate
-    """
-    
-    if dropout_rate < 0 or dropout_rate > 1:
-      raise ValueError("Dropout rate must be between 0 and 1.")
-    
-    self.dropout_rate = dropout_rate
-    self.name = kwargs.get('name', 'dropout')
-    self.method = kwargs.get('method', 'independent')
-    self.is_scaled = kwargs.get('scaled', True)
-    self.mask = [0]
-  
-  def apply(self, input):
-    
-    scale = 1/(1 - self.dropout_rate) if self.is_scaled else 1
-    
-    if len(arraytools.shape(input)) == 2:
-      
-      if self.method == 'fixed':
-        actives = [scale for _ in range( (arraytools.shape(input)[0] * arraytools.shape(input)[1]) - int((arraytools.shape(input)[0] * arraytools.shape(input)[1]) * self.dropout_rate) )]
-        self.mask = [0 for _ in range((arraytools.shape(input)[0] * arraytools.shape(input)[1]) - len(actives))] + actives
-        random.shuffle(self.mask)
-        self.mask = arraytools.reshape(self.mask, arraytools.shape(input)[0], arraytools.shape(input)[1])
-        
-      elif self.method == 'independent':
-        self.mask = [
-          [scale if random.random() > self.dropout_rate else 0 for _ in range(len(input[0]))]
-          for _ in range(len(input))]
-      
-      else:
-        raise ValueError(f"Unknown method: '{self.method}', Method must be 'independent' or 'fixed'")
-      
-      return [
-        [a * b for a, b in zip(row, gate)] for row, gate in zip(input, self.mask)
-      ]
-      
-    elif len(arraytools.shape(input)) == 1:
-      
-      if self.method == 'fixed':
-        actives = [scale for _ in range( len(input) - int(len(input) * self.dropout_rate) )]
-        self.mask = [0 for _ in range(len(input) - len(actives))] + actives
-        random.shuffle(self.mask)
-        
-      elif self.method == 'independent':
-        self.mask = [scale if random.random() > self.dropout_rate else 0 for _ in range(len(input))]
-      
-      else:
-        raise ValueError(f"Unknown method: '{self.method}', Method must be 'independent' or 'fixed'")
-      
-      return [a * b for a, b in zip(input, self.mask)]
-
-    else:
-      raise TypeError("input to a Dropout layer must be a 1D array list or a 2D array list")
-
-

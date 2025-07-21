@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.multinet as net
+import api.synapse as net
 
 import tools.arraytools as tools
 import tools.visual as visual
@@ -11,10 +11,10 @@ import time
 import math
 import random
 import numpy as np
-from core.encoder import OneHotEncoder
+from core.encoder import OneHotEncode
 
 start_time = time.perf_counter()
-test = 1
+test = 2
 
 if test == 1: # CNN
 
@@ -49,7 +49,7 @@ if test == 1: # CNN
   
   model = net.Sequential( 
     
-    net.Convolution((2,2), 'relu'),
+    net.Convolution((2,2), 1, 'relu'),
     net.Flatten(),
   )
 
@@ -535,7 +535,7 @@ elif test == 8: # 2D test
   training_features, training_target = make_blobs(n_samples=200, n_features=2, centers=3, random_state=0, cluster_std=0.9)
 
   training_features = training_features.tolist()
-  training_target = [ OneHotEncoder(3, x)  for x in training_target.tolist()]
+  training_target = [ OneHotEncode(3, x)  for x in training_target.tolist()]
   
   model = net.Sequential(
     net.Dense(2, 'leaky relu'),

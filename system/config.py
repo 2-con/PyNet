@@ -19,4 +19,4 @@ crash_tolerance = 5
 # PyNet Defaults
 
 # easter egg
-brainrot = "OwO Hewwo Thewe! Goob luck with making ur Fuwwy PrOwOtogen-i mean AI! :3"
+brainrot = "OwO Hewwo Thewe! Good luck with making ur AI! :3"

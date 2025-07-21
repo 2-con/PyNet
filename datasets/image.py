@@ -1,3 +1,13 @@
+"""
+Important
+=====
+The data in this file has to be loaded first before using it.
+Navigate to this file at Pynet > Datasets > image.py and run it.
+Once the data is fully loaded, move the data into this directory.
+
+This happens because Git / Github does not allow large files to be uploaded.
+"""
+
 import json
 
 def OneHotEncoder(length: int, *args: int):

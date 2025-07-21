@@ -1622,5 +1622,5 @@ class sunsetwest:
     else:
       return ' '.join([word for word in Sunset_West.split()][:self.word_count])
 
-  def author():
-    return "Sunset West by Aufy Mulyadi 2024"
+  def author() -> str:
+    return "'Sunset West' by Aufy Mulyadi - 2024"

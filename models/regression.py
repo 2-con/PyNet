@@ -1,7 +1,17 @@
 """
 Regression
 =====
-
+  Regression algorithms for PyNet
+-----
+Provides
+-----
+- Linear Regression
+- Polynomial Regression
+- Logistic Regression
+- Exponential Regression
+- Power Regression
+- Logarithmic Regression
+- Sinusoidal Regression (external model, does not follow PyNet API)
 """
 
 import sys, os
@@ -1002,39 +1012,60 @@ class Exponential:
     for _neuron in self.neurons
     ]
 
-# class Sinusoidal:
-#   # AI made this as an example on what to do
-#   # this is not mine
+class Sinusoidal:
+  def __init__(self, input_size: int, num_harmonics: int = 1):
+    """
+    Sinusoidal Regression
+    -----
+      Create a multidimensional sinusoidal regression model with custom hyperparameters,
+      this model was originally designed outside of PyNet and does not follow the PyNet API and standardization.
+    -----
+    Args
+    -----
+    - input_size     (int) : number of input features
+    - num_harmonics (int) : number of harmonics
+    """
+    self.input_size = input_size
+    self.num_harmonics = num_harmonics
+    self.weights = np.zeros((input_size, num_harmonics))
+    self.inner_weights = np.zeros((input_size, num_harmonics))
+    self.inner_biases = np.zeros((input_size, num_harmonics))
+    self.bias = 0
 
-#   def __init__(self, input_size: int, num_harmonics: int = 1):
-#     self.input_size = input_size
-#     self.num_harmonics = num_harmonics
-#     self.weights = np.zeros((input_size, num_harmonics))
-#     self.inner_weights = np.zeros((input_size, num_harmonics))
-#     self.inner_biases = np.zeros((input_size, num_harmonics))
-#     self.bias = 0
+  def fit(self, features, targets, learning_rate, epochs):
+    """
+    Fit
+    -----
+      Fit the model to the training data, since this model was designed outside of PyNet, it does not have a compiler and is using its own operations.
+      some features of PyNet such as optimizers, loss functions and metrics are not available in this model.
+    -----
+    Args
+    -----
+    - features  (list) : list of input features
+    - targets   (list) : list of targets
+    - learning_rate (float) : learning rate
+    - epochs    (int) : number of epochs
+    """
+    for _ in range(epochs):
+      for point, target in zip(features, targets):
+        prediction = self.predict(point)
+        error = target - prediction
+        self.bias += learning_rate * error
+        for i in range(self.input_size):
+          for j in range(self.num_harmonics):
+            self.weights[i, j] += learning_rate * error * math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
+            self.inner_weights[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * point[i]
+            self.inner_biases[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
 
-#   def fit(self, features, targets, learning_rate: float = 0.01, epochs: int = 1000):
-#     for _ in range(epochs):
-#       for point, target in zip(features, targets):
-#         prediction = self.predict(point)
-#         error = target - prediction
-#         self.bias += learning_rate * error
-#         for i in range(self.input_size):
-#           for j in range(self.num_harmonics):
-#             self.weights[i, j] += learning_rate * error * math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
-#             self.inner_weights[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * point[i]
-#             self.inner_biases[i, j] += learning_rate * error * self.weights[i, j] * math.cos(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j])
+  def predict(self, point):
+    if len(point) != self.input_size:
+      raise ValueError(f"point must have {self.input_size} elements")
 
-#   def predict(self, point):
-#     if len(point) != self.input_size:
-#       raise ValueError(f"point must have {self.input_size} elements")
-
-#     weighted_sum = 0
-#     for i in range(self.input_size):
-#       for j in range(self.num_harmonics):
-#         weighted_sum += math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * self.weights[i, j]
-#     return weighted_sum + self.bias
+    weighted_sum = 0
+    for i in range(self.input_size):
+      for j in range(self.num_harmonics):
+        weighted_sum += math.sin(self.inner_weights[i, j] * point[i] + self.inner_biases[i, j]) * self.weights[i, j]
+    return weighted_sum + self.bias
 
 class Power:
   def __init__(self, input_size, output_size):

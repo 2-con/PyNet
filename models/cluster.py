@@ -4,6 +4,15 @@ Cluster
 
 """
 
+
+
+"""
+To anyone reading this,
+
+This wasn't part of the original plan, but I decided to add clustering algorithms to the models.
+I will be working on the rest of the clustering algorithms in the future, but for now, I will leave this here.
+"""
+
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

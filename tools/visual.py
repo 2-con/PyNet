@@ -57,11 +57,11 @@ def image_display(input, **kwargs):
         print("•", end=" ")
     print()
 
-def numerical_display(data, pad=2, start_indent=0, decimals=10, **kwargs):
+def numerical_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10, **kwargs):
   """
   Numerical Display
   -----
-    Displays the 1D/2D array nicely
+    Displays any n-dimensional array nicely
   -----
   Args
   -----
@@ -80,6 +80,10 @@ def numerical_display(data, pad=2, start_indent=0, decimals=10, **kwargs):
   maxnum = kwargs.get('maxnum', 0)
   padding = kwargs.get('padding', [])
   depth = kwargs.get('depth', 0)
+  
+  if type(data) in (int, float, str, bool):
+    print(data)
+    return
   
   # padding
   # multidimensional
@@ -160,6 +164,38 @@ def numerical_display(data, pad=2, start_indent=0, decimals=10, **kwargs):
       numerical_display(data[i], pad, start_indent=start_indent + pad, decimals=decimals, maxnum=maxnum, padding=padding, depth=depth + 1)
       
     print(indent + ']')
+
+def tree_display(start_node, pad:int = 2):
+  """
+  Tree Display
+  -----
+    Prints a tree structure in a hierarchical format. for this to function, the tree in question must be a PyNet Node object.
+  -----
+  Args
+  -----
+  - start_node (PyNet Node object) : The node object from which to start visualization.
+  - indent_width (int) : The number of spaces to use for each level of indentation.
+  """
+  if start_node is None:
+    print("Tree is empty or node is None.")
+    return
+
+  def _print_node_recursive(node, prefix=""):
+    if node is None:
+      return
+
+    print(f"{prefix}■ Args: {node.args} ║ Kwargs: {node.kwargs}")
+    
+    # Recurse for children
+    for i, child in enumerate(node.children):
+      
+      is_last_child = i == len(node.children) - 1
+      new_prefix_branch = prefix + (" " + " " * (pad - 1) if not is_last_child else " " * pad)
+      
+      _print_node_recursive(child, new_prefix_branch)
+
+  # Start the recursive printing from the given node
+  _print_node_recursive(start_node, prefix="")
 
 def char_display(string, speed, wrap = 50):
   """

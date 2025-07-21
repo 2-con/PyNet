@@ -7,7 +7,7 @@ A collection of tools for working with arrays, mainly 1D and 2D arrays
 import random
 import math
 
-def convolve(matrix, kernel):
+def correlate(matrix, kernel):
   """
   Convolve
   -----
