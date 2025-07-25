@@ -1,0 +1,4 @@
+Plan
+
+- add parametric activations
+- rework maxpooling and meanpooling for synapse for channel compatibility

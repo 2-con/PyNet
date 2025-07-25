@@ -130,7 +130,7 @@ def Hinge_loss(ytrue:list, ypred:list):
 
 def Gini_impurity(items:list):
   if not items:
-    raise ValueError("elements cannot be empty")
+    return 0
   
   total = len(items)
   if total == 0:
@@ -153,7 +153,7 @@ def Gini_impurity(items:list):
 
 def Entropy(items:list):
   if not items:
-    raise ValueError("elements cannot be empty")
+    return 0
   
   total = len(items)
   if total == 0:
@@ -174,3 +174,4 @@ def Entropy(items:list):
       entropy -= probability * math.log(probability, 2)
   
   return entropy
+

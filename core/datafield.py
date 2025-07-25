@@ -1,3 +1,9 @@
+"""
+Data Field
+=====
+  Basic frameworks for data containers, some PyNet processes depends and inherits from these data containers to operate.
+  but besides being foundational, these classes are also useful for more complex data structures.
+"""
 
 class Datacontainer:
   def __init__(self, data, *args, **kwargs):
@@ -9,10 +15,20 @@ class Datacontainer:
     Args
     -----
     - data : the data to be stored
+    - args : any additional data
+    - kwargs : any additional data
     """
     self.data = data
     self.args = args
     self.kwargs = kwargs
+    
+  def contents(self) -> None:
+    print("Data")
+    print(f"  {self.data}")
+    print("Args")
+    print(f"  {self.args}")
+    print("KW Args")
+    print(f"  {self.kwargs}")
 
 class Node:
   def __init__(self, *args, **kwargs):
@@ -70,11 +86,11 @@ class Node:
     else:
       raise ValueError("Child node not found in children")
   
-  def get_children(self, index=None):
+  def get_child(self, index=None):
     """
-    Get Children
+    Get Child
     -----
-      Returns the children of the current node.
+      Returns all of the children of the current node. If an index is provided, returns the child at that index provided it has a child at the index.
     -----
     Args
     -----
@@ -93,9 +109,9 @@ class Node:
     
     return self.children
   
-  def get_level(self):
+  def depth(self) -> int:
     """
-    Get Level
+    Depth
     -----
       Returns the level of the node.
     -----
@@ -104,7 +120,7 @@ class Node:
     - int : the level of the node
     """
     
-    level = 0
+    level = 1
     current_node = self
     while current_node.parent is not None:
       level += 1
@@ -112,7 +128,7 @@ class Node:
     
     return level
 
-  def get_first(self):
+  def get_first(self) -> "Node":
     """
     Get First
     -----
@@ -129,7 +145,7 @@ class Node:
     
     return current_node
   
-  def get_last(self):
+  def get_last(self) -> list:
     """
     Get Last
     -----
@@ -155,4 +171,4 @@ class Node:
           stack.append(child)
           
     return leaves
-    
+

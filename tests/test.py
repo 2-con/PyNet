@@ -4,7 +4,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import api.synapse as net
 
 import tools.arraytools as tools
-import tools.visual as visual
 from tools.arraytools import generate_random_array
 import matplotlib.pyplot as plt
 import time
@@ -12,6 +11,7 @@ import math
 import random
 import numpy as np
 from core.encoder import OneHotEncode
+from tools.visual import display_boundary
 
 start_time = time.perf_counter()
 test = 2
@@ -49,7 +49,7 @@ if test == 1: # CNN
   
   model = net.Sequential( 
     
-    net.Convolution((2,2), 1, 'relu'),
+    net.Convolution((2,2), 3, 'relu'),
     net.Flatten(),
   )
 
@@ -104,6 +104,8 @@ elif test == 2: # NN
   
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
+  
+  display_boundary(model, training_features, training_target)
   
 elif test == 3: # RNN
   training_features = [
@@ -551,8 +553,8 @@ elif test == 8: # 2D test
     batch_size=1,
     epochs=500,
     metrics=['accuracy'],
-    logging=1,
-    verbose=6
+    logging=100,
+    verbose=3
   )
   
   model.fit(
@@ -582,4 +584,4 @@ if test == 8:
   plt.plot(range(len(model.error_logs))           , model.error_logs           , color='red')
   plt.plot(range(len(model.validation_error_logs)), model.validation_error_logs, color='blue')
   
-  plot_decision_boundary(model, training_features, training_target, 0.01)
+  display_boundary(model, training_features, training_target)

@@ -9,6 +9,6 @@ setup(
 
   author='Aufy Mulyadi',
   author_email='72212@jisedu.or.id',
-  description='PyNet is a neural network framework library for Python.',
-  license='MIT',
+  description='PyNet is a neural network framework and API library for Python.',
+  license='Apache License 2.0',
 )

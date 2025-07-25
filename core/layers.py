@@ -5,6 +5,8 @@ import random
 import numpy as np
 
 from tools import arraytools, scaler, utility, visual
+from system.defaults import parametric_alpha_default, parametric_beta_default
+from system.config import *
 
 from core import activation as Activation
 from core import derivative as Derivative
@@ -13,8 +15,7 @@ from core import metric as Metrics
 from core import initialization as Initialization
 import core.optimizer as optimizer
 Optimizer = optimizer.Optimizer  # set global object just in case
-
-from core.structure import Datacontainer as dc
+from core.datafield import Datacontainer as dc
 
 class Key:
 
@@ -25,9 +26,7 @@ class Key:
     'mish': Activation.Mish,
     'swish': Activation.Swish,
     'leaky relu': Activation.Leaky_ReLU,
-    'elu': Activation.ELU,
     'gelu': Activation.GELU,
-    'selu': Activation.SELU,
     'reeu': Activation.ReEU,
     'none': Activation.Linear,
     'tandip': Activation.TANDIP,
@@ -37,6 +36,12 @@ class Key:
     'softsign': Activation.Softsign,
     'sigmoid': Activation.Sigmoid,
     'tanh': Activation.Tanh,
+    
+    # parametric functions
+    'elu': Activation.ELU,
+    'selu': Activation.SELU,
+    'prelu': Activation.PReLU,
+    'silu': Activation.SiLU
   }
 
   SCALER = {
@@ -62,12 +67,10 @@ class Key:
     'none': Initialization.Default,
   }
 
-# class Datacontainer(dc):
-#   def __init__(self, data, *args, **kwargs):
-#     super().__init__(data, *args, **kwargs)
-#     self.parallel = kwargs.get('parallel', False)
-
-# Learnable layers
+class Datacontainer(dc):
+  def __init__(self, data, *args, **kwargs):
+    super().__init__(data, *args, **kwargs)
+    self.parallel = kwargs.get('parallel', False)
 
 class Convolution:
   def __init__(self, kernel:tuple, channels:int, activation:str, **kwargs):
@@ -92,9 +95,7 @@ class Convolution:
     - Mish
     - Swish
     - Leaky ReLU
-    - ELU
     - GELU
-    - SELU
     - ReEU
     - None
     - TANDIP
@@ -104,9 +105,17 @@ class Convolution:
     - Softsign
     - Sigmoid
     - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
     """
     self.kernel_shape = kernel
     self.channels = channels
+    
+    self.parametric_hyperparameters = []
     
     self.activation = activation.lower()
     self.learnable = kwargs.get('learnable', True)
@@ -118,8 +127,10 @@ class Convolution:
   def reshape_input_shape(self, input_shape):
     self.input_shape = input_shape
     
+    self.alphas = arraytools.generate_array(input_shape[2], self.channels, value=parametric_alpha_default)
+    self.betas = arraytools.generate_array(input_shape[2], self.channels, value=parametric_beta_default)
     self.kernels = arraytools.generate_random_array(self.kernel_shape[0], self.kernel_shape[1], input_shape[2], self.channels)
-    self.bias = arraytools.generate_random_array(input_shape[2], self.channels) if self.use_bias else arraytools.generate_array(input_shape[2], self.channels, value=0)
+    self.bias = arraytools.generate_random_array(input_shape[2], self.channels) if self.use_bias else arraytools.generate_array(input_shape[2], self.channels)
     
   def apply(self, multichannel_input):
     
@@ -128,25 +139,25 @@ class Convolution:
     if len(arraytools.shape(multichannel_input)) < 3:
       multichannel_input = [multichannel_input]
     
-    for channel, bias_sublist in zip(self.kernels, self.bias):
+    for channel, bias_sublist, alpha_sublist, beta_sublist in zip(self.kernels, self.bias, self.alphas, self.betas):
       
       raw_ans = []
       
-      for kernel, input, bias in zip(channel, multichannel_input, bias_sublist):
+      for kernel, input, bias, alpha, beta in zip(channel, multichannel_input, bias_sublist, alpha_sublist, beta_sublist):
         
         m_rows = len(input)
         m_cols = len(input[0])
         k_rows = len(kernel)
         k_cols = len(kernel[0])
         
-        # Calculate the dimensions of the output matrix
+        # calculate the dimensions of the output matrix
         output_rows = (m_rows - k_rows) + 1
         output_cols = (m_cols - k_cols) + 1
         
-        # Initialize the output matrix with zeros
+        # initialize output matrix
         output = [[0] * output_cols for _ in range(output_rows)]
         
-        # Perform convolution
+        # correlate (correct terminology)
         for i in range(output_rows):
           for j in range(output_cols):
             dot_product = 0
@@ -156,7 +167,7 @@ class Convolution:
                 
                 dot_product += input[i + ki][j + kj] * kernel[ki][kj]
         
-            output[i][j] = Key.ACTIVATION[self.activation](dot_product) + bias 
+            output[i][j] = Key.ACTIVATION[self.activation](dot_product, alpha=alpha, beta=beta) + bias 
 
         raw_ans.append(output)
       
@@ -228,9 +239,7 @@ class Convolution2D:
     - Mish
     - Swish
     - Leaky ReLU
-    - ELU
     - GELU
-    - SELU
     - ReEU
     - None
     - TANDIP
@@ -240,9 +249,22 @@ class Convolution2D:
     - Softsign
     - Sigmoid
     - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
     """
     self.kernel = arraytools.generate_random_array(kernel[0], kernel[1])
-    
+    self.alpha = parametric_alpha_default
+    self.beta = parametric_beta_default
     self.activation = activation.lower()
     self.learnable = kwargs.get('learnable', True)
     self.use_bias = kwargs.get('bias', True)
@@ -277,7 +299,7 @@ class Convolution2D:
           for kj in range(k_cols):
             dot_product += input[i + ki][j + kj] * self.kernel[ki][kj]
     
-        output[i][j] = Key.ACTIVATION[self.activation](dot_product) + self.bias 
+        output[i][j] = Key.ACTIVATION[self.activation](dot_product, alpha=self.alpha, beta=self.beta) + self.bias 
     
     return output
 
@@ -330,9 +352,7 @@ class Dense:
     - Mish
     - Swish
     - Leaky ReLU
-    - ELU
     - GELU
-    - SELU
     - ReEU
     - None
     - TANDIP
@@ -342,6 +362,12 @@ class Dense:
     - Softsign
     - Sigmoid
     - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
     
     Initialization
     - Xavier uniform in
@@ -359,9 +385,9 @@ class Dense:
     self.activation = activation.lower()
     self.input_shape = kwargs.get('input_shape', 0)
     
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
+    if activation.lower() in parametric_rectifiers or activation.lower() in static_rectifiers:
       default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
+    elif activation.lower() in normalization_functions or activation.lower() in parametric_normalization_functions:
       default_initializer = 'glorot normal'
     else:
       raise ValueError(f"Unknown activation function: '{activation}'")
@@ -383,7 +409,9 @@ class Dense:
     self.neurons = [
       {
       'weights': [Key.INITIALIZATION[self.initialization](input_shape, output_shape) for _ in range(input_shape)],
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape)
+      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
+      'alpha': parametric_alpha_default,
+      'beta': parametric_beta_default
       }
       for _ in range(self.output_shape)
     ]
@@ -400,7 +428,9 @@ class Dense:
     # iterate over all the neurons
     answer = [
     Key.ACTIVATION[self.activation](
-        sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias']
+      sum(input_val * weight_val for input_val, weight_val in zip(input, _neuron['weights'])) + _neuron['bias'],
+      alpha=_neuron['alpha'],
+      beta=_neuron['beta']
     )
     for _neuron in self.neurons
 ]
@@ -445,9 +475,7 @@ class Localunit:
     - Mish
     - Swish
     - Leaky ReLU
-    - ELU
     - GELU
-    - SELU
     - ReEU
     - None
     - TANDIP
@@ -457,6 +485,12 @@ class Localunit:
     - Softsign
     - Sigmoid
     - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
     
     Initialization
     - Xavier uniform in
@@ -471,13 +505,13 @@ class Localunit:
     - None
     """
     self.receptive_field = receptive_field
-    self.activation = activation
+    self.activation = activation.lower()
     self.name = kwargs.get('name', 'local unit')
     self.learnable = kwargs.get('learnable', True)
     
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
+    if activation.lower() in parametric_rectifiers or activation.lower() in static_rectifiers:
       default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
+    elif activation.lower() in normalization_functions or activation.lower() in parametric_normalization_functions:
       default_initializer = 'glorot normal'
     else:
       raise ValueError(f"Unknown activation function: '{activation}'")
@@ -504,7 +538,9 @@ class Localunit:
     self.neurons = [
       {
       'weights': [Key.INITIALIZATION[self.initialization](input_shape, next_shape) for _ in range(self.receptive_field)],
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, next_shape)
+      'bias': Key.INITIALIZATION[self.initialization](input_shape, next_shape),
+      'alpha': parametric_alpha_default,
+      'beta': parametric_beta_default
       }
       for _ in range(self.output_shape)
     ]
@@ -527,7 +563,12 @@ class Localunit:
 
         dot_product += input[a + b] * self.neurons[a]['weights'][b]
 
-      answer.append(Key.ACTIVATION[self.activation](dot_product + self.neurons[a]['bias']))
+      answer.append(Key.ACTIVATION[self.activation](
+        dot_product + self.neurons[a]['bias'], 
+        alpha=self.neurons[a]['alpha'], 
+        beta=self.neurons[a]['beta']
+        )
+      )
     return answer
 
   def get_weighted_sum(self, input: list):
@@ -551,6 +592,8 @@ class Localunit:
       answer.append(dot_product + self.neurons[a]['bias'])
     return answer
 
+# AFS might be deprecated since its a specialized version of Localunit without contributing anything of value.
+# consider removing this layer before it becomes a technical debt
 class AFS:
   def __init__(self, activation, **kwargs):
     """
@@ -566,45 +609,49 @@ class AFS:
     - (Optional) learnable (boolean) : whether or not to learn
     - (Optional) name      (string)  : the name of the layer
     -----
-      (Activation functions)
-      - ReLU
-      - Softplus
-      - Mish
-      - Swish
-      - Leaky ReLU
-      - ELU
-      - GELU
-      - SELU
-      - ReEU
-      - None
-      - TANDIP
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - TANDIP
 
-      (Normalization functions)
-      - Binary Step
-      - Softsign
-      - Sigmoid
-      - Tanh
+    Normalization functions
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
       
-      Initialization
-      - Xavier uniform in
-      - Xavier uniform out
-      - He uniform
-      - Glorot uniform
-      - LeCun uniform
-      - He normal
-      - Glorot normal
-      - LeCun normal
-      - Default
-      - None
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
     """
     self.activation = activation.lower()
     self.name = kwargs.get('name', 'feature scaler')
     self.learnable = kwargs.get('learnable', True)
     self.use_bias = kwargs.get('bias', True)
     
-    if activation.lower() in ('relu','softplus','mish','swish','leaky relu','elu','gelu','selu','reeu','none','tandip'):
+    if activation.lower() in parametric_rectifiers or activation.lower() in static_rectifiers:
       default_initializer = 'he normal'
-    elif activation.lower() in ('binary step','softsign','sigmoid','tanh'):
+    elif activation.lower() in normalization_functions or activation.lower() in parametric_normalization_functions:
       default_initializer = 'glorot normal'
     else:
       raise ValueError(f"Unknown activation function: '{activation}'")
@@ -622,14 +669,21 @@ class AFS:
     self.neurons = [
       {
       'weight': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape)
+      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
+      'alpha': parametric_alpha_default,
+      'beta': parametric_beta_default
       }
       for _ in range(input_shape)
     ]
 
   def apply(self, input):
 
-    return [Key.ACTIVATION[self.activation](self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias']) for i in range(len(input))]
+    return [Key.ACTIVATION[self.activation](
+      self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias'], 
+      alpha=self.neurons[i]['alpha'], 
+      beta=self.neurons[i]['beta']
+      ) for i in range(len(input))
+    ]
 
   def get_weighted_sum(self, input: list):
     self.input = input[:]
@@ -657,7 +711,11 @@ class Recurrent:
     - (Optional) learnable (boolean) : whether or not to learn, on by default
     - (Optional) name      (string)  : the name of the layer
     """
-    self.activation = activation
+    self.activation = activation.lower()
+    
+    # activation parameters
+    self.alpha = parametric_alpha_default
+    self.beta = parametric_beta_default
     
     self.accept_input = kwargs.get('input', True)
     self.return_output = kwargs.get('output', True)
@@ -671,7 +729,7 @@ class Recurrent:
   
   def apply(self, input, carry):
     
-    return Key.ACTIVATION[self.activation]((input * self.input_weight) + (carry * self.carry_weight) + self.bias)
+    return Key.ACTIVATION[self.activation]((input * self.input_weight) + (carry * self.carry_weight) + self.bias, alpha=self.alpha, beta=self.beta)
 
   def get_weighted_sum(self, input, carry):
     
@@ -851,9 +909,11 @@ class Maxpooling:
   def apply(self, input_channels):
     multichannel_ans = []
     answer = []
-    self.input_size = arraytools.shape(input)
+    self.input_size = arraytools.shape(input_channels)
 
     for input in input_channels:
+      answer = []
+      
       # iterate over all the layers
       for a in range(0, len(input), self.stride):
 
@@ -869,12 +929,13 @@ class Maxpooling:
             # control the horizontal
             for d in range(self.size):
 
-              if a+c < len(input) and b+d < len(input[a]):
+              if a + c < len(input) and b + d < len(input[a]):
                 pool.append(input[a+c][b+d])
 
           layer_output.append( max(pool) )
 
         answer.append(layer_output[:])
+        
       multichannel_ans.append(answer)
 
     return multichannel_ans
@@ -945,9 +1006,11 @@ class Meanpooling:
   def apply(self, input_channels):
     multichannel_ans = []
     answer = []
-    self.input_size = arraytools.shape(input)
+    self.input_size = arraytools.shape(input_channels)
 
     for input in input_channels:
+      answer = []
+      
       # iterate over all the layers
       for a in range(0, len(input), self.stride):
 
@@ -969,7 +1032,7 @@ class Meanpooling:
           layer_output.append( sum(pool) / len(pool) )
 
         answer.append(layer_output[:])
-      multichannel_ans.appen(answer)
+      multichannel_ans.append(answer)
 
     return multichannel_ans
 
@@ -1095,39 +1158,45 @@ class Operation:
     Operation
     -----
       Operational layer for functions or normalizations.
+      
+      Parametric functions will not be able to change their hyperparameters since it defeats an operation-only layer.
     -----
     Args
     -----
     - operation    (string) : the scaler to use
     - (Optional) name   (string) : the name of the layer
     -----
-    Available Operations:
+    Active Operations:
 
-      (Scalers)
-      - standard scaler
-      - min max scaler
-      - max abs scaler
-      - robust scaler
+    Scalers
+    - standard scaler
+    - min max scaler
+    - max abs scaler
+    - robust scaler
 
-      (Activation functions)
-      - ReLU
-      - Softplus
-      - Mish
-      - Swish
-      - Leaky ReLU
-      - ELU
-      - GELU
-      - SELU
-      - ReEU
-      - None
-      - TANDIP
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - TANDIP
 
-      (Normalization functions)
-      - Binary Step
-      - Softsign
-      - Sigmoid
-      - Tanh
-      - Softmax
+    Normalization functions
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    - Softmax
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
     """
     self.operation = operation.lower()
     self.name = kwargs.get('name', 'operation')

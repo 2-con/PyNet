@@ -11,14 +11,14 @@ Provides
   1. Convolution
   2. Dense
   3. Localunit
+  4. AFS (Adaptive Feature Scaler)
 
   (Utility layers)
   1. Maxpooling
   2. Meanpooling
   3. Flatten
   4. Reshape
-  5. AFS (Adaptive Feature Scaler)
-  6. Operation (normalization and activation functions)
+  5. Operation (normalization and activation functions)
   
   (Architectural layers)
   1. RecurrentBlock
@@ -63,6 +63,8 @@ from core import derivative as Derivative
 from core import loss as Error
 from core import metric as Metrics
 from core import initialization as Initialization
+from core import parametric_derivative as P_Derivative
+from core.utility import *
 
 from core.layers import Convolution, Dense, Localunit, AFS, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
 import core.optimizer as optimizer
@@ -280,8 +282,6 @@ class Key:
 
 """ TODO:
 
-
-
 """
 
 #######################################################################################################
@@ -297,9 +297,7 @@ class Key:
     'mish': Activation.Mish,
     'swish': Activation.Swish,
     'leaky relu': Activation.Leaky_ReLU,
-    'elu': Activation.ELU,
     'gelu': Activation.GELU,
-    'selu': Activation.SELU,
     'reeu': Activation.ReEU,
     'none': Activation.Linear,
     'tandip': Activation.TANDIP,
@@ -309,6 +307,12 @@ class Key:
     'softsign': Activation.Softsign,
     'sigmoid': Activation.Sigmoid,
     'tanh': Activation.Tanh,
+    
+    # parametric functions
+    'elu': Activation.ELU,
+    'selu': Activation.SELU,
+    'prelu': Activation.PReLU,
+    'silu': Activation.SiLU
   }
 
   ACTIVATION_DERIVATIVE = {
@@ -330,8 +334,38 @@ class Key:
     'softsign': Derivative.Softsign_derivative,
     'sigmoid': Derivative.Sigmoid_derivative,
     'tanh': Derivative.Tanh_derivative,
+    
+    # parametric functions
+    'elu': Derivative.ELU_derivative,
+    'selu': Derivative.SELU_derivative,
+    'prelu': Derivative.PReLU_derivative,
+    'silu': Derivative.SiLU_derivative
   }
 
+  PARAMETRIC_DERIVATIVE = {
+    'elu': P_Derivative.ELU_parametric_derivative,
+    'selu': P_Derivative.SELU_parametric_derivative,
+    'prelu': P_Derivative.PReLU_parametric_derivative,
+    'silu': P_Derivative.SiLU_parametric_derivative,
+    
+    # extra stuff so the whole API dosnt crash
+    'relu': do_nothing,
+    'softplus': do_nothing,
+    'mish': do_nothing,
+    'swish': do_nothing,
+    'leaky relu': do_nothing,
+    'gelu': do_nothing,
+    'reeu': do_nothing,
+    'none': do_nothing,
+    'tandip': do_nothing,
+
+    # normalization functions
+    'binary step': do_nothing,
+    'softsign': do_nothing,
+    'sigmoid': do_nothing,
+    'tanh': do_nothing,
+  }
+  
   SCALER = {
     'standard scaler': scaler.standard_scaler,
     'min max scaler': scaler.min_max_scaler,
@@ -484,7 +518,7 @@ class Sequential:
     -----
       Compiles the model to be ready for training.
       the PyNet commpiler will automatically take care of hyperparameters and fine tuning under the hood
-      unless explicitly defined 
+      unless explicitly defined.
     -----
     Args
     -----
@@ -501,19 +535,18 @@ class Sequential:
     - (Optional) batchsize        (int)   : batch size, defaults to 1
     - (Optional) initialization   (int)   : weight initialization
     - (Optional) experimental     (str)   : experimental settings to use, refer to the documentation for more information
+    - (Optional) verbose          (int) : whether to show anything during training
+    - (Optional) logging          (int) : how often to show training stats
     
-    - (optional) verbose          (int) : whether to show anything during training
-    - (optional) logging          (int) : how often to show training stats
+    Weight and bias optimizer hyperparameters
+    -----
+    - (Optional) optimizer_alpha    (float)
+    - (Optional) optimizer_beta     (float)
+    - (Optional) optimizer_gamma    (float)
+    - (Optional) optimizer_epsilon  (float)
     
-    Optimizer hyperparameters
-    -----
-    - (Optional) alpha    (float)
-    - (Optional) beta     (float)
-    - (Optional) epsilon  (float)
-    - (Optional) gamma    (float)
-    - (Optional) delta    (float)
-    -----
     Optimizers
+    -----
     - ADAM        (Adaptive Moment Estimation)
     - RMSprop     (Root Mean Square Propagation)
     - Adagrad
@@ -528,6 +561,7 @@ class Sequential:
     - None        (Full Gradient)
 
     Losses
+    -----
     - mean squared error
     - mean abseloute error
     - total squared error
@@ -538,13 +572,13 @@ class Sequential:
     - hinge loss
 
     Metrics
+    -----
     - accuracy
     - precision
     - recall
     - f1 score
     - roc auc
     - r2 score
-
     """
     self.optimizer = optimizer.lower()
     self.loss = loss.lower()
@@ -552,21 +586,20 @@ class Sequential:
     self.learning_rate = learning_rate
     self.epochs = epochs
     
-    self.batchsize = kwargs.get('batchsize', 1)
-    self.experimental = kwargs.get('experimental', [])
-    self.stopping = kwargs.get('early_stopping', False)
-    self.patience = kwargs.get('patience', 5)
-    self.validation = kwargs.get('validation', loss.lower())
+    self.batchsize        = kwargs.get('batchsize', 1)
+    self.experimental     = kwargs.get('experimental', [])
+    self.stopping         = kwargs.get('early_stopping', False)
+    self.patience         = kwargs.get('patience', 5)
+    self.validation       = kwargs.get('validation', loss.lower())
     self.validation_split = kwargs.get('validation_split', 0)
     
     self.verbose = kwargs.get('verbose', 0)
     self.logging = kwargs.get('logging', 1)
     
-    self.alpha = kwargs.get('alpha', None) # momentum decay
-    self.beta = kwargs.get('beta', None)
-    self.epsilon = kwargs.get('epsilon', None) # zerodivison prevention
-    self.gamma = kwargs.get('gamma', None)
-    self.delta = kwargs.get('delta', None)
+    self.optimizer_alpha    = kwargs.get('optimizer_alpha', None)
+    self.optimizer_beta     = kwargs.get('optimizer_beta', None)
+    self.optimizer_epsilon  = kwargs.get('optimizer_epsilon', None)
+    self.optimizer_gamma    = kwargs.get('optimizer_gamma', None)
 
     self.is_compiled = True
 
@@ -840,7 +873,7 @@ class Sequential:
             derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
 
             sqrt_size = int(len(derivative_list)**0.5)
-            derivative_list = arraytools.reshape(derivative_list, sqrt_size, sqrt_size)
+            derivative_list = arraytools.reshape(derivative_list, (sqrt_size, sqrt_size))
 
             num_outputs = len(initial_gradient)
             num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
@@ -860,8 +893,8 @@ class Sequential:
         elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
 
           output_layer_errors = [
-              error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted)
-              for error, weighted in zip(initial_gradient, weighted_sums[-1])
+              error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted, alpha=neuron['alpha'], beta=neuron['beta'])
+              for error, weighted, neuron in zip(initial_gradient, weighted_sums[-1], self.layers[-1].neurons)
           ]
 
         elif type(self.layers[-1]) == Flatten: # if its a flatten layer
@@ -877,7 +910,7 @@ class Sequential:
           error_D = 0
           total_error = error_C + error_D
           
-          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1])
+          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1], alpha=self.layers[-1].alpha, beta=self.layers[-1].beta)
           
           error_Wa = derivative * total_error * activations[-1][0]
           error_Wb = derivative * total_error * activations[-1][1]
@@ -1031,32 +1064,32 @@ class Sequential:
           if type(prev_layer) == Dense:
             
             layer_errors = [
-            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
             sum(
                 prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index]
                 for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
             )
-            for this_neuron_index, _ in enumerate(this_layer.neurons)
+            for this_neuron_index, neuron in enumerate(this_layer.neurons)
               ]
 
           elif type(prev_layer) == AFS:
             layer_errors = [
-            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
             prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight']
-            for this_neuron_index, _ in enumerate(this_layer.neurons)
+            for this_neuron_index, neuron in enumerate(this_layer.neurons)
             ]
             
           elif type(prev_layer) == Operation:
             layer_errors = [
-                  Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+                  Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
                   prev_errors[this_neuron_index]
-                  for this_neuron_index, _ in enumerate(this_layer.neurons)
+                  for this_neuron_index, neuron in enumerate(this_layer.neurons)
               ]
 
           elif type(prev_layer) == Localunit:
             
             layer_errors = [
-                Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index]) *
+                Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
                 sum(
                     prev_errors[prev_neuron_index] * prev_neuron['weights'][
                         index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) # Pass receptive_field
@@ -1064,7 +1097,7 @@ class Sequential:
                     for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons)
                     if index_corrector(this_neuron_index - prev_neuron_index, prev_layer.receptive_field) is not None # Check condition here
                 )
-                for this_neuron_index, _ in enumerate(this_layer.neurons)
+                for this_neuron_index, neuron in enumerate(this_layer.neurons)
             ]
             
           elif type(prev_layer) == Dropout:
@@ -1123,7 +1156,7 @@ class Sequential:
               for row, row_mask in zip(layer_errors, this_layer.mask)
             ]
           
-        ###################################################################################### TO BE OVERHAULED
+        ######################################################################################
         elif type(this_layer) == Convolution:
           
           updater_total_err = []
@@ -1131,11 +1164,11 @@ class Sequential:
           
           raw_errs = []
           
-          for channel_index, (channel, previous_err) in enumerate(zip(this_layer.kernels, prev_errors)):
+          for channel_index, (channel, previous_err, alphas, betas) in enumerate(zip(this_layer.kernels, prev_errors, this_layer.alphas, this_layer.betas)):
             
             updater_err = []
             
-            for kernel in channel:
+            for kernel, alpha, beta in zip(channel, alphas, betas):
               
               if 'BPP_kernel_flip' in self.experimental:
                 kernel = arraytools.mirror(this_layer.kernel[:], 'X')
@@ -1155,7 +1188,7 @@ class Sequential:
                       
                       # Accumulate the weighted error
                       
-                      smol_err[output_row][output_col] += previous_err[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[channel_index][a][b])
+                      smol_err[output_row][output_col] += previous_err[a][b] * kernel[kernel_row][kernel_col] * Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[channel_index][a][b], alpha=alpha, beta=beta)
 
               updater_err.append(smol_err)
               raw_errs.append(smol_err)
@@ -1217,74 +1250,79 @@ class Sequential:
           
           layer_errors = arraytools.reshape(prev_errors[:], this_layer.input_shape)
 
-        ###################################################################################### REWORK
+        ######################################################################################
         elif type(this_layer) == Maxpooling:
-          thisx, thisy = this_layer.input_size
-
-          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+          
+          thisx, thisy, channels = this_layer.input_size
+          
+          layer_errors = arraytools.generate_array(thisx, thisy, channels, value=0)
 
           skibidi = -1
 
-          # iterate over all the layers
-          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+          for channel_index in range(channels):
+            
+            # iterate over all the layers
+            for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
 
-            skibidi += 1
-            toilet = -1
+              skibidi += 1
+              toilet = -1
 
-            # # iterate over all the elements in the layer
-            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-              toilet += 1
+              # # iterate over all the elements in the layer
+              for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+                toilet += 1
 
-              max_value = this_WS[skibidi][toilet]  # Get the maximum value
-              count = 0  # Count of elements with the maximum value
+                max_value = this_WS[skibidi][toilet]  # Get the maximum value
+                count = 0  # Count of elements with the maximum value
 
-              # Find all elements with the maximum value in the pooling window
-              for c in range(this_layer.size):
-                for d in range(this_layer.size):
-                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
-                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
-                      count += 1
+                # Find all elements with the maximum value in the pooling window
+                for c in range(this_layer.size):
+                  for d in range(this_layer.size):
+                    if a + c < len(weighted_sums[this_layer_index - 1][channel_index]) and b + d < len(weighted_sums[this_layer_index - 1][channel_index][a]):
+                      if weighted_sums[this_layer_index - 1][channel_index][a + c][b + d] == max_value:
+                        count += 1
 
-              # Distribute the gradient equally among the maximum elements
-              for c in range(this_layer.size):
-                for d in range(this_layer.size):
-                  if a + c < len(weighted_sums[this_layer_index - 1]) and b + d < len(weighted_sums[this_layer_index - 1][a]):
-                    if weighted_sums[this_layer_index - 1][a + c][b + d] == max_value:
-                      layer_errors[a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
-
-        ###################################################################################### REWORK
+                # Distribute the gradient equally among the maximum elements
+                for c in range(this_layer.size):
+                  for d in range(this_layer.size):
+                    if a + c < len(weighted_sums[this_layer_index - 1][channel_index]) and b + d < len(weighted_sums[this_layer_index - 1][channel_index][a]):
+                      if weighted_sums[this_layer_index - 1][channel_index][a + c][b + d] == max_value:
+                        layer_errors[channel_index][a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+                  
+        ######################################################################################
         elif type(this_layer) == Meanpooling:
 
-          thisx, thisy = this_layer.input_size
+          thisx, thisy, channels = this_layer.input_size
 
-          layer_errors = arraytools.generate_array(thisx, thisy, value=0)
+          layer_errors = arraytools.generate_array(thisx, thisy, channels, value=0)
 
           # for meanpooling, we need to distribute the error over the kernel size
           # this is done by dividing the error by the kernel size (averaging it over the kernel size)
 
           skibidi = -1
+          
+          for channel_index in range(channels):
+            
+            # iterate over all the layers
+            for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
 
-          # iterate over all the layers
-          for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
+              skibidi += 1
+              toilet = -1
 
-            skibidi += 1
-            toilet = -1
+              # iterate over all the elements in the layer
+              for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
+                toilet += 1
 
-            # iterate over all the elements in the layer
-            for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-              toilet += 1
+                # control the vertical
+                for c in range(this_layer.size):
 
-              # control the vertical
-              for c in range(this_layer.size):
+                  # control the horizontal
+                  for d in range(this_layer.size):
 
-                # control the horizontal
-                for d in range(this_layer.size):
+                    if a+c < len(weighted_sums[this_layer_index-1][channel_index]) and b+d < len(weighted_sums[this_layer_index-1][channel_index][a]):
 
-                  if a+c < len(weighted_sums[this_layer_index-1]) and b+d < len(weighted_sums[this_layer_index-1][a]):
+                      # distribute the error over the kernel size
 
-                    # distribute the error over the kernel size
-
-                    layer_errors[a+c][b+d] += prev_errors[skibidi][toilet] / (this_layer.size**2)
+                      layer_errors[channel_index][a+c][b+d] += prev_errors[channel_index][skibidi][toilet] / (this_layer.size**2)
 
         ######################################################################################
         elif type(this_layer) == Operation:
@@ -1341,7 +1379,7 @@ class Sequential:
               layer_errors.append( prev_errors[this_neuron_index] )
 
         # recurrent layers
-        # always in isolation unless blocked
+        # always in isolation unless blocked (inside a RecurrentBlock)
         ######################################################################################
         elif type(this_layer) == Recurrent:
           if type(prev_layer) != Recurrent:
@@ -1355,7 +1393,7 @@ class Sequential:
           else:
             total_error = error_D
           
-          derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS)
+          derivative = Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS, alpha=this_layer.alpha, beta=this_layer.beta)
           
           error_Wa = derivative * total_error * this_activations[0]
           error_Wb = derivative * total_error * this_activations[1]
@@ -1496,12 +1534,6 @@ class Sequential:
     
     def update(activations, weighted_sum, errors, timestep):
 
-      alpha = self.alpha
-      beta = self.beta
-      epsilon = self.epsilon
-      gamma = self.gamma
-      delta = self.delta
-
       optimize = Key.OPTIMIZER.get(self.optimizer)
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
@@ -1531,8 +1563,19 @@ class Sequential:
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
-
+              neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, 
+                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+              
+            # update alpha and beta
+            
+            param_id += 1
+            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+            
+            param_id += 1
+            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+              
             # Updating bias
             bias_gradient = 0
 
@@ -1543,7 +1586,8 @@ class Sequential:
               bias_gradient /= batchsize
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Convolution and layer.learnable:
           
@@ -1607,7 +1651,7 @@ class Sequential:
                     weight_gradient[a][b] /= batchsize
 
                   kernel[a][b] = optimize(learning_rate, kernel[a][b], kernel_error[a][b], self.optimizer_instance, 
-                                          alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, 
+                                          alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                           param_id=param_id, timestep=timestep)
 
               if layer.use_bias:
@@ -1618,7 +1662,7 @@ class Sequential:
                   bias_gradients = [(b / batchsize for b in a) for a in bias_gradients]
 
                 layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, self.optimizer_instance, 
-                                                                   alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, 
+                                                                   alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                                    param_id=param_id, timestep=timestep)
 
         elif type(layer) == AFS and layer.learnable:
@@ -1636,8 +1680,20 @@ class Sequential:
               weight_gradient /= batchsize
 
             param_id += 1
-            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, 
+                                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
+            # update alpha and beta
+            
+            param_id += 1
+            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+            
+            param_id += 1
+            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+              
+            
             # calculate bias gradient
             if layer.use_bias:
               bias_gradient = 0
@@ -1649,7 +1705,8 @@ class Sequential:
                 bias_gradient /= batchsize
 
               param_id += 1
-              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, 
+                                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Localunit and layer.learnable:
 
@@ -1668,8 +1725,19 @@ class Sequential:
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, 
+                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
+            # update alpha and beta
+            
+            param_id += 1
+            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+            
+            param_id += 1
+            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+            
             # Updating bias
 
             bias_gradient = 0
@@ -1681,7 +1749,8 @@ class Sequential:
               bias_gradient /= batchsize
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
         elif type(layer) == Recurrent and layer.learnable:
           Wa_gradient = 0
@@ -1699,12 +1768,21 @@ class Sequential:
             B_gradient  /= batchsize
 
           param_id += 1
-          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
           param_id += 1
-          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
           param_id += 1
-          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
-        
+          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+          param_id += 1
+          neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+          param_id += 1
+          neuron['beta']  = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
+                                     alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+          
         elif type(layer) == LSTM and layer.learnable:
           
           B_ERR     = [0] * 4 # biases (merge)
@@ -1726,20 +1804,24 @@ class Sequential:
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
-            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
+                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.short_term_weights):
             param_id += 1
-            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, 
+                                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
-            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
           
           for index, weight in enumerate(layer.extra_weights):
             param_id += 1
             if layer.version == 'statquest':
-              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, 
+                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
         
         elif type(layer) == GRU and layer.learnable:
           
@@ -1759,15 +1841,18 @@ class Sequential:
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
-            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
+                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
           for index, weight in enumerate(layer.carry_weights):
             param_id += 1
-            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, 
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
 
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
-            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
         
         elif type(layer) == RecurrentBlock:
           
@@ -1787,17 +1872,17 @@ class Sequential:
     features  = features[train_amount:][:]
     targets   = targets[train_amount:][:]
     
-    if True: # Error Prevention
-
-      # Function args - error prevention
-      if not type(features) in (list, tuple):
-        raise TypeError("features must be a list")
-      if not type(targets) in (list, tuple):
-        raise TypeError("targets must be a list")
-      if len(features) == 0 or len(targets) == 0:
-        raise ValueError("features or targets must not be empty")
-      if any(x == [] for x in features) or any(x == [] for x in targets):
-        raise ValueError("feature or target must not be empty")
+    # Function args - error prevention
+    if not type(features) in (list, tuple):
+      raise TypeError("features must be a list")
+    if not type(targets) in (list, tuple):
+      raise TypeError("targets must be a list")
+    if len(features) == 0 or len(targets) == 0:
+      raise ValueError("features or targets must not be empty")
+    if any(x == [] for x in features) or any(x == [] for x in targets):
+      raise ValueError("incomplete data detected")
+    if len(features) != len(targets):
+      raise SystemError("features and targets must be the same length")
 
     # neural network fitting
     x = features[0]

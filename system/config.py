@@ -3,20 +3,12 @@ Configuration
 =====
 
 This file contains the configuration for the all of the PyNET files.
-do not tinker unless you know what you are doing!
 """
 
-# Synapse API
+# classification (low impact)
 
-frozen_ROC_warn = False
-frozen_ROC_stop = False
+parametric_rectifiers               = ('relu','softplus','mish','swish','leaky relu','gelu','reeu','none','tandip')
+static_rectifiers                   = ('elu, selu, prelu, silu')
+normalization_functions             = ('binary step','softsign','sigmoid','tanh')
+parametric_normalization_functions  = ()
 
-explosion_warn = False
-explosion_stop = False
-
-crash_tolerance = 5
-
-# PyNet Defaults
-
-# easter egg
-brainrot = "OwO Hewwo Thewe! Good luck with making ur AI! :3"

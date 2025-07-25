@@ -1,5 +1,5 @@
 
-def OneHotEncode(length:int, *args:int,):
+def OneHotEncode(length:int, *args:int,) -> list:
   """
   Manually create a single one-hot encoded vector.
   """
@@ -10,7 +10,7 @@ def OneHotEncode(length:int, *args:int,):
 
   return answer
 
-def OneHotEncoder(data):
+def OneHotEncoder(data:list) -> list:
   """
   One Hot Encoder
   -----
@@ -29,7 +29,7 @@ def OneHotEncoder(data):
     
   return answer
 
-def OrdinalEncoder(ranking, data):
+def OrdinalEncoder(ranking:list, data:list) -> list:
   """
   Ordinal Encoder
   -----
@@ -50,3 +50,31 @@ def OrdinalEncoder(ranking, data):
       raise ValueError(f"'{element}' not found in ranking list.")
     
   return answer
+
+def Binarizer(threshold:float, data) -> list:
+  """
+  Binarizer
+  -----
+    Convert every numerical element in a list to either a 0 or a 1 depending of said element exceeds a certain threshold.
+  -----
+  Args
+  -----
+  - threshold (float or int): The threshold value to compare against.
+  - data (list): List of numerical elements to be binarized.
+  """
+  return [1 if x > threshold else 0 for x in data]
+
+def BinaryEncoder(data:list) -> list:
+  """
+  Binary Encoder
+  -----
+    Convert every numerical element in a list to binary where each number represent a scaler.
+    simmilar to OneHotEncoder, it will return the data as a vector.
+  -----
+  Args
+  -----
+  - data (list): List of numerical elements to be binarized. every element present must be an integer
+  """
+  
+  return [bin(x)[2:].split() for x in data]
+

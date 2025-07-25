@@ -7,8 +7,11 @@ Visualizes 2D/1D arrays through the terminal.
 import time
 from tools.arraytools import shape
 from tools.math import sgn
+import numpy as np
+import matplotlib.pyplot as plt
+from tools.scaler import argmax
 
-def image_display(input, **kwargs):
+def image_display(input:list, **kwargs) -> None:
   """
   Black and White Display
   -----
@@ -20,10 +23,6 @@ def image_display(input, **kwargs):
   - (Optional) upper_tolerance (float) : pixels with values higher than the boundary + upper_tolerance will be displayed as "■"
   - (Optional) lower_tolerance (float) : pixels with values lower than the boundary - lower_tolerance will be displayed as "□"
   - (Optional) title           (string) : the title of the image
-  
-  Returns
-  -----
-    None
   """
   upper_tolerance = kwargs.get('upper_tolerance', 0)
   lower_tolerance = kwargs.get('lower_tolerance', 0)
@@ -57,7 +56,7 @@ def image_display(input, **kwargs):
         print("•", end=" ")
     print()
 
-def numerical_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10, **kwargs):
+def array_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10, **kwargs) -> None:
   """
   Numerical Display
   -----
@@ -69,10 +68,6 @@ def numerical_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10
   - (optional) pad          (int)           : the number of spaces to indent the data
   - (optional) start_indent (int)           : the initial number of spaces to indent the data
   - (Optional) decimals     (string)        : displays how much decimals to show, assumeing its a float
-  
-  Returns
-  -----
-    None
   """
   data_shape = shape(data)
   indent = ' ' * start_indent
@@ -161,11 +156,11 @@ def numerical_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10
   else:
     print(indent + '[')
     for i in range(data_shape[-1]):
-      numerical_display(data[i], pad, start_indent=start_indent + pad, decimals=decimals, maxnum=maxnum, padding=padding, depth=depth + 1)
+      array_display(data[i], pad, start_indent=start_indent + pad, decimals=decimals, maxnum=maxnum, padding=padding, depth=depth + 1)
       
     print(indent + ']')
 
-def tree_display(start_node, pad:int = 2):
+def tree_display(start_node, pad:int = 2) -> None:
   """
   Tree Display
   -----
@@ -197,7 +192,7 @@ def tree_display(start_node, pad:int = 2):
   # Start the recursive printing from the given node
   _print_node_recursive(start_node, prefix="")
 
-def char_display(string, speed, wrap = 50):
+def char_display(string, speed, wrap = 50) -> None:
   """
   Charachter Display
   -----
@@ -208,10 +203,6 @@ def char_display(string, speed, wrap = 50):
   - string (string) : the string to display
   - speed  (float)  : how fast to print
   - wrap   (int)    : how far the text can go before wrapping
-  
-  Returns
-  -----
-    None
   """
   
   count = 0
@@ -225,7 +216,7 @@ def char_display(string, speed, wrap = 50):
     print(i, end='', flush=True)
   print()
 
-def word_display(string, speed, wrap = 50):
+def word_display(string, speed, wrap = 50) -> None:
   """
   Charachter Display
   -----
@@ -236,10 +227,6 @@ def word_display(string, speed, wrap = 50):
   - string (string) : the string to display
   - speed  (float)  : how fast to print
   - wrap   (int)    : how far the text can go before wrapping
-  
-  Returns
-  -----
-    None
   """
   count = 0
   for i in string.split():
@@ -251,3 +238,73 @@ def word_display(string, speed, wrap = 50):
     
     print(i, end=' ', flush=True)
   print()
+
+def display_boundary(model, features:list, targets:list, *args, **kwargs) -> None:
+  """
+  Plot Boundary
+  -----
+    Plots the decision boundary of a 2D binary classification model. The provided features must only contain two features (2D) for this function to work.
+  -----
+  Args
+  -----
+  - model (PyNet Model) : the model to construct the decision boundary from
+  - features (list) : the features to plot
+  - targets   (list) : the targets to plot, helps color-in the points
+  - (Optional) title (str) : the title of the plot
+  - (Optional) zoom (int or float) : the initial zoon of the plot
+  - (Optional) cmap (matplotlib.colors.Colormap) : the colormap to use for the decision regions
+  - (Optional) transparency (float) : the transparency of the decision regions
+  - (Optional) n_points (int) : the number of points to use for the meshgrid along each dimension (quality of the boundary)
+  """
+  
+  cmap = kwargs.get('cmap', plt.cm.RdBu)
+  title = kwargs.get('title', '')
+  alpha = kwargs.get('transparency', 0.5)
+  n_points = kwargs.get('n_points', 200)
+  zoom = kwargs.get('zoom', 1)
+  
+  ax=None
+  X_np = np.asarray(features)
+  y_np = np.asarray(targets)
+  
+  if X_np.shape[1] != 2:
+    raise ValueError("X must be a 2D array to plot a decision boundary.")
+
+  # plotting
+  
+  if ax is None:
+    fig, ax = plt.subplots(figsize=(8, 7))
+
+  x_min, x_max = X_np[:, 0].min() - zoom, X_np[:, 0].max() + zoom
+  y_min, y_max = X_np[:, 1].min() - zoom, X_np[:, 1].max() + zoom
+
+  xx, yy = np.meshgrid(np.linspace(x_min, x_max, n_points),
+                       np.linspace(y_min, y_max, n_points))
+
+  # prepare meshgrid for prediction
+  meshgrid_points = np.c_[xx.ravel(), yy.ravel()]
+  predictions_input_for_model = meshgrid_points.tolist()
+  
+  if hasattr(model, 'push'):
+    Z_list_output = [argmax(a) for a in [model.push(x) for x in predictions_input_for_model]]
+  else:
+    Z_list_output = [model.predict(x) for x in predictions_input_for_model]
+
+  # convert back to a np array for reshaping
+  Z = np.asarray(Z_list_output).reshape(xx.shape)
+
+  # plot regions and data points
+  ax.contourf(xx, yy, Z, cmap=cmap, alpha=alpha)
+  
+  if hasattr(model, 'push'):
+    scatter = ax.scatter(X_np[:, 0], X_np[:, 1], c=[ argmax(x) for x in targets], cmap=cmap, edgecolor='k', s=80, zorder=2)
+  else:
+    scatter = ax.scatter(X_np[:, 0], X_np[:, 1], c=y_np, cmap=cmap, edgecolor='k', s=80, zorder=2)
+
+  ax.set_title(title)
+  ax.set_xlim(xx.min(), xx.max())
+  ax.set_ylim(yy.min(), yy.max())
+
+  plt.show()
+  
+

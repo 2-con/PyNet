@@ -32,9 +32,9 @@ def clamp(x, a, b):
     Clamps a value within a specified range.
   -----
   Args:
-    a (int / float): The minimum value of the range.
-    b (int / float): The maximum value of the range.
-    x (int / float): The value to clamp.
+    a (int or float): The minimum value of the range.
+    b (int or float): The maximum value of the range.
+    x (int or float): The value to clamp.
   """
   return max(min(x, b), a)
 
@@ -45,8 +45,8 @@ def lerp(a, b, t):
     Linear interpolation between two values.
   -----
   Args:
-    a (int / float): The start value.
-    b (int / float): The end value.
+    a (int or float): The start value.
+    b (int or float): The end value.
     t (float): The interpolation factor, typically between 0 and 1.  
   """
   return a + t * (b - a)
@@ -59,30 +59,6 @@ def smoothstep(edge0, edge1, x):
     return 1
   t = (x - edge0) / (edge1 - edge0)
   return t * t * (3 - 2 * t)
-
-def degrees_to_radians(degrees):
-  """Converts degrees to radians."""
-  return degrees * math.pi / 180
-
-def radians_to_degrees(radians):
-  """Converts radians to degrees."""
-  return radians * 180 / math.pi
-
-def distance_2d(x1, y1, x2, y2):
-  """Calculates the 2D Euclidean distance between two points."""
-  return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-
-def distance_3d(x1, y1, z1, x2, y2, z2):
-  """Calculates the 3D Euclidean distance between two points."""
-  return math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
-
-def manhattan_distance(x1, y1, x2, y2):
-  """Calculates the Manhattan distance between two points."""
-  return abs(x2 - x1) + abs(y2 - y1)
-
-def manhattan_distance_3d(x1, y1, z1, x2, y2, z2):
-  """Calculates the 3D Manhattan distance between two points."""
-  return abs(x2 - x1) + abs(y2 - y1) + abs(z2 - z1)
 
 def ackermann(x,y):
   """
@@ -105,19 +81,18 @@ def ackermann(x,y):
   else:
     return ackermann(x-1, ackermann(x, y-1))
 
-def factorial(x):
-  """
-  Factorial
-  -----
-    Computes the factorial of a number.
-  -----
-  Args:
-    x (int): The number to compute the factorial of.
-  -----
-  Returns:
-    int: The factorial of the number.
-  """
-  if x == 0:
-    return 1
-  else:
-    return x * factorial(x-1)
+def Variance(items:list):
+  if not items:
+    raise ValueError("elements cannot be empty")
+  
+  total = len(items)
+  if total == 0:
+    return 0
+  
+  variance = 0.0
+  mean = sum(items) / total
+  for item in items:
+    variance += (item - mean) ** 2
+  
+  return variance
+

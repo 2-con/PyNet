@@ -1,6 +1,10 @@
 """
 Multinet API
 =====
+  ## Warning: Potentially deprecation
+  Multinet is originally intended to shortcut and cut corners on some aspects of Synapse API that was not present before.
+  Multinet is now facing deprecation in light of the inneficincies and redundancies present.
+  
   A high-level API for sequential and parallel models of neural networks, but due to optimization and compatibility issues,
   some layers found in Synapse API are not compatible with Multinet API. Along with Convolution layers 
   that are limited to one channels with a single kernel.
@@ -14,14 +18,14 @@ Provides
   1. Convolution
   2. Dense
   3. Localunit
+  4. AFS (Adaptive Feature Scaler)
 
   (Utility layers)
   1. Maxpooling
   2. Meanpooling
   3. Flatten
   4. Reshape
-  5. AFS (Adaptive Feature Scaler)
-  6. Operation (normalization and activation functions)
+  5. Operation (normalization and activation functions)
   
   (Parallelization / Branching)
   1. Parallel
@@ -72,7 +76,7 @@ from core.layers import Flatten2D as Flatten
 from core.layers import Dense, Localunit, AFS, Recurrent, LSTM, GRU, Reshape, Operation, Merge, Dropout
 
 import core.optimizer as optimizer
-from core.structure import Datacontainer as dc
+from core.datafield import Datacontainer as dc
 
 Optimizer = optimizer.Optimizer # set global object
 
@@ -139,6 +143,8 @@ Optimizer = optimizer.Optimizer # set global object
 
 """ TODO:
 
+
+
 """
 
 #######################################################################################################
@@ -154,9 +160,7 @@ class Key:
     'mish': Activation.Mish,
     'swish': Activation.Swish,
     'leaky relu': Activation.Leaky_ReLU,
-    'elu': Activation.ELU,
     'gelu': Activation.GELU,
-    'selu': Activation.SELU,
     'reeu': Activation.ReEU,
     'none': Activation.Linear,
     'tandip': Activation.TANDIP,
@@ -166,6 +170,12 @@ class Key:
     'softsign': Activation.Softsign,
     'sigmoid': Activation.Sigmoid,
     'tanh': Activation.Tanh,
+    
+    # parametric functions
+    'elu': Activation.ELU,
+    'selu': Activation.SELU,
+    'prelu': Activation.PReLU,
+    'silu': Activation.SiLU
   }
 
   ACTIVATION_DERIVATIVE = {
@@ -187,6 +197,12 @@ class Key:
     'softsign': Derivative.Softsign_derivative,
     'sigmoid': Derivative.Sigmoid_derivative,
     'tanh': Derivative.Tanh_derivative,
+    
+    # parametric functions
+    'elu': Derivative.ELU_derivative,
+    'selu': Derivative.SELU_derivative,
+    'prelu': Derivative.PReLU_derivative,
+    'silu': Derivative.SiLU_derivative
   }
 
   SCALER = {
@@ -1955,17 +1971,6 @@ class Sequential:
     self.LSTM = any(type(layer) == LSTM for layer in self.layers)
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
     
-    
-    
-    
-    # import matplotlib.pyplot as plt
-    # from tests.test3 import plot_DBR
-    # plt.ion() # Turn on interactive mode for dynamic updates
-    # fig, ax = plt.subplots(figsize=(9, 7))
-    
-    
-    
-    
     # main training loop - iterate over the epochs
     for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if self.verbose==1 else range(epochs):
       epoch_loss = 0
@@ -2066,13 +2071,6 @@ class Sequential:
           break
       
       if epoch % self.logging == 0 and self.verbose>=3:
-        
-        
-        
-        # plot_DBR(self, features, targets, epoch, ax=ax, fig=fig)
-        
-        
-        
         
         prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%)"
         pad                 = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%)") - len(prefix))
@@ -3745,3 +3743,70 @@ class Datacontainer(dc):
   def __init__(self, data, *args, **kwargs):
     super().__init__(data, *args, **kwargs)
     self.parallel = kwargs.get('parallel', False)
+
+
+class Merge:
+  def __init__(self, merge_type, **kwargs):
+    """
+    Merge
+    -----
+      Merges every branch from the 'Parallel' layer into one, techniques are customizable.
+      this layer will not do anything on any other layer. 
+    -----
+    Args
+    -----
+      merge_type (str) : the type of merge to apply
+    ---
+    Merge types:
+     - 'total'   : pointwise addition of all the return values
+     - 'concat'  : concatenation of all the return values horizontally
+     - 'average' : pointwise average of all the return values
+    """
+    self.name = kwargs.get('name', 'merge')
+    self.merge_type = merge_type
+    self.input_shapes = []
+    self.points = 0
+  
+  def apply(self, input):
+    merge_type = self.merge_type
+    
+    if type(input) == Datacontainer:
+      input = input.data
+      
+      self.input_shapes = []
+      for item in input:
+        
+        self.input_shapes.append(arraytools.shape(item))
+        
+        if len(arraytools.shape(item)) != len(arraytools.shape(input[0])):
+          raise EnvironmentError('All tensors must be the same dimensions, please ensure the parallel layer produce a spatially unifrom output')
+        
+        if arraytools.shape(item) != arraytools.shape(input[0]) and len(arraytools.shape(item)) > 1:
+          raise EnvironmentError('All tensors must be the same shape and size, please ensure the parallel layer produce a spatially unifrom output')
+      
+    else:
+      self.input_shapes = arraytools.shape(input)
+      self.points = len(input)
+      return input
+    
+    final_answer = []
+    
+    if merge_type == 'total':
+      
+      final_answer = arraytools.total(*input)
+      
+    elif merge_type == 'concat':
+      
+      final_answer = arraytools.concat(*input)
+      
+    elif merge_type == 'average':
+      final_answer = arraytools.total(*input)
+      
+      if len(arraytools.shape(final_answer)) == 2:
+        final_answer = [[scaler/len(self.input_shapes) for scaler in row] for row in final_answer]
+        
+      else:
+        final_answer = [scaler/len(self.input_shapes) for scaler in final_answer]
+    
+    self.points = len(final_answer)
+    return final_answer
