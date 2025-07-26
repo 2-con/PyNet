@@ -1972,7 +1972,7 @@ class Sequential:
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
     
     # main training loop - iterate over the epochs
-    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if self.verbose==1 else range(epochs):
+    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=100, empty=' ') if self.verbose==1 else range(epochs):
       epoch_loss = 0
       
       # main training section - iterate over the entire dataset

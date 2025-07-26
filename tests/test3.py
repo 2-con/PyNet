@@ -2,30 +2,21 @@ import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import api.multinet as net
-from tools.arraytools import generate_random_array as array
-from tools.visual import array_display as display
+import time
+from tools.arraytools import generate_random_array
 
-features = array(10,100)
-targets = array(4,100)
+features = generate_random_array(100,1000)
+targets = generate_random_array(10,1000)
 
 model = net.Sequential(
-  net.Parallel(
-    net.Dense(8, 'relu'),
-    net.Dense(8, 'relu'),
-  ),
-  net.Parallel(
-    net.Dense(4, 'relu'),
-    net.Dense(4, 'relu'),
-  ),
-  net.Parallel(
-    net.Dense(2, 'relu'),
-    net.Dense(2, 'relu'),
-  ),
-  net.Merge('concat')
+  # net.Dense(64, 'relu'),
+  # net.Dense(64, 'relu'),
+  net.Dense(32, 'relu'),
+  net.Dense(10, 'relu'),
 )
 
 model.compile(
-  optimizer='adam',
+  optimizer='none',
   loss='mean squared error',
   learning_rate=0.01,
   epochs=100,
@@ -34,4 +25,10 @@ model.compile(
   verbose=3
 )
 
+start_time = time.perf_counter()
 model.fit(features, targets)
+end_time = time.perf_counter()
+duration = end_time - start_time
+print(f"""
+      finished training in {duration} seconds
+      """)

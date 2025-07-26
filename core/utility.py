@@ -6,7 +6,7 @@ Utility
   are stored in their respective modules.
 """
 
-def split(data, second_size=0.2):
+def split(data, second_size):
   """
   Split
   -----
@@ -16,7 +16,7 @@ def split(data, second_size=0.2):
   Args
   -----
   - second_size (float) : controls how much of the original list will go towards the second list
-
+  -----
   Returns
   -----
     (1st half, second half)
@@ -25,4 +25,18 @@ def split(data, second_size=0.2):
   return data[:first_size], data[first_size:]
 
 def do_nothing(*args, **kwargs) -> 0:
+  """
+  Do Nothing
+  -----
+    Does nothing and returns 0
+  -----
+  Args
+  -----
+  - args (positional) : positional arguments
+  - kwargs (keyword)  : keyword arguments
+  -----
+  Returns
+  -----
+    0
+  """
   return 0

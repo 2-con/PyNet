@@ -1,4 +1,6 @@
 Plan
 
-- add parametric activations
-- rework maxpooling and meanpooling for synapse for channel compatibility
+FLASH               - 4.0207365000096615 seconds
+synapse (optimized) - 83.16224219999276 seconds
+synapse             - 207.0442339000001 seconds
+multinet            - 214.57770520000486 seconds

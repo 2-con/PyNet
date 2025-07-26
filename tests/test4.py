@@ -1,34 +1,33 @@
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from sklearn.datasets import make_moons, make_blobs
+import api.flash as flash
+from tools.arraytools import generate_random_array
+from core.loss import Mean_squared_error as mse
+from core.activation import ReLU
+from core.derivative import ReLU_derivative
+from tools.utility import progress_bar
+import time
 
-# training_features, training_target = make_blobs(n_samples=100, n_features=2, centers=3, cluster_std=1.9)
-training_features, training_target = make_moons(n_samples=200, noise=0.05)
+features = generate_random_array(100,600)
+targets = generate_random_array(10,600)
 
-from models.classifier import RandomForest, DecisionTree
-from tools.visual import display_boundary, tree_display
+model = flash.initialize(100,32,10)
 
-features = training_features.tolist()
-targets =  training_target.tolist()
+start_time = time.perf_counter()
 
-# model = RandomForest()
-# model.compile(
-#   n_estimators=10,
-#   depth=8,
-#   loss='gini',
-#   split=1,
-#   bootstrap=True,
-#   max_features='sqrt'
-# )
+for epoch in progress_bar(range(100), "> Training", "%  Complete") if False else range(100):
+  for feature, target in zip(features, targets):
+    activations, weighted_sums = flash.propagate(model, feature, ReLU)
+    error = flash.backpropegate(model, activations, weighted_sums, target, ReLU_derivative)
+    
+    flash.update(model, activations, error, 0.01)
 
-model = DecisionTree()
-model.compile(
-  depth=10,
-  loss='gini',
-  split=1,
-)
+  if epoch % 10 == 0:
+    print(f"Epoch {epoch:5} | Error {mse(target, activations[-1])}")
 
-model.fit(features, targets)
-display_boundary(model, features, targets, zoom=1)
-
+end_time = time.perf_counter()
+duration = end_time - start_time
+print(f"""
+      finished training in {duration} seconds
+      """)

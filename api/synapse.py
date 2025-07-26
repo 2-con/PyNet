@@ -11,7 +11,6 @@ Provides
   1. Convolution
   2. Dense
   3. Localunit
-  4. AFS (Adaptive Feature Scaler)
 
   (Utility layers)
   1. Maxpooling
@@ -41,7 +40,7 @@ if __name__ == "__main__":
   print("""
         This file is not meant to be run as a main file.
         More information can be found about PyNet's Synapse API on the documentation.
-        'docs.txt' or https://www.pynet.com/api_docs/python/synapse
+        system > 'docs.txt' or the GitHub repository at https://github.com/2-con/PyNet
         """)
   exit()
 
@@ -51,9 +50,6 @@ if __name__ == "__main__":
 
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import random
-import numpy as np
 
 from tools import arraytools, scaler, utility, visual
 from tools import math as math2
@@ -65,8 +61,9 @@ from core import metric as Metrics
 from core import initialization as Initialization
 from core import parametric_derivative as P_Derivative
 from core.utility import *
+from system.config import *
 
-from core.layers import Convolution, Dense, Localunit, AFS, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
+from core.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
 import core.optimizer as optimizer
 
 Optimizer = optimizer.Optimizer # initialize the optimizer instance
@@ -464,7 +461,6 @@ class Sequential:
     - Flatten
     - Reshape
     - Dense
-    - AFS (Adaptive Feature Scaler)
     - Operation
     - Localunit
     
@@ -507,8 +503,8 @@ class Sequential:
     -----
     - layer (synapse object) : the layer to add to the model
     """
-    if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit):
-      raise ValueError("layer must be of type Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, or AFS")
+    if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Localunit, RecurrentBlock):
+      raise ValueError("layer must be of type Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape or RecurrentBlock")
 
     self.layers.append(layer)
 
@@ -522,21 +518,22 @@ class Sequential:
     -----
     Args
     -----
-    - optimizer                   (str)   : optimizer to use
+    - optimizer                   (str)   : optimizer to use during training, this introduces a lot of overhead so training might be slower
     - loss                        (str)   : loss function to use
-    - metrics                     (list)  : metrics to use
+    - metrics                     (list)  : metrics to use to validate the model
     - learning_rate               (float) : learning rate to use
     - epochs                      (int)   : number of epochs to train for
     
-    - (Optional) early_stopping   (bool)  : whether or not to use early stopping, defaults to False
+    - (Optional) early_stopping   (bool)  : whether or not to use early stopping, Evaluates based on the validation set. Defaults to False
     - (Optional) patience         (bool)  : how many epochs to wait before early stopping, defaults to 5
     - (Optional) validation       (bool)  : the metrics for validation, defaults to the loss
     - (Optional) validation_split (float) : controls how much of the training data is used for validation, defaults to 0 (ranges from 0 to 1)
     - (Optional) batchsize        (int)   : batch size, defaults to 1
     - (Optional) initialization   (int)   : weight initialization
-    - (Optional) experimental     (str)   : experimental settings to use, refer to the documentation for more information
-    - (Optional) verbose          (int) : whether to show anything during training
-    - (Optional) logging          (int) : how often to show training stats
+    - (Optional) experimental     (list)  : experimental settings to use, refer to the documentation for more information
+    - (Optional) verbose          (int)   : whether to show anything during training
+    - (Optional) logging          (int)   : how often to show training stats
+    - (Optional) optimize         (int)   : speed up training by overriding PyNet overhead and cut corners. This disables optimizers, parametrics and skips training when possible.
     
     Weight and bias optimizer hyperparameters
     -----
@@ -579,6 +576,11 @@ class Sequential:
     - f1 score
     - roc auc
     - r2 score
+    
+    Experimental settings
+    -----
+    - 'fullgrad'
+      - Use the full gradient of the loss function instead of averaging it over the batch. 
     """
     self.optimizer = optimizer.lower()
     self.loss = loss.lower()
@@ -592,6 +594,8 @@ class Sequential:
     self.patience         = kwargs.get('patience', 5)
     self.validation       = kwargs.get('validation', loss.lower())
     self.validation_split = kwargs.get('validation_split', 0)
+    
+    self.optimize = kwargs.get('optimize', False)
     
     self.verbose = kwargs.get('verbose', 0)
     self.logging = kwargs.get('logging', 1)
@@ -607,7 +611,7 @@ class Sequential:
     if self.layers == [] or self.layers is None:
       raise ValueError("No layers in model")
     for layer_index, layer in enumerate(self.layers):
-      if type(layer) not in (Dense, Convolution, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit, Recurrent, LSTM, GRU, RecurrentBlock, Dropout):
+      if type(layer) not in (Dense, Convolution, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Localunit, Recurrent, LSTM, GRU, RecurrentBlock, Dropout):
         raise TypeError(f"Unknown layer type '{layer.__class__.__name__ }' at layer {layer_index+1}")
 
     # Kwargs - error prevention
@@ -735,7 +739,7 @@ class Sequential:
         xWS = 0
         for layer in self.layers:
           
-          if type(layer) in (Convolution, Dense, AFS, Operation, Localunit):
+          if type(layer) in (Convolution, Dense, Operation, Localunit):
             xWS = layer.get_weighted_sum(x)
             weighted_sums.append(xWS)
           
@@ -890,7 +894,7 @@ class Sequential:
 
             output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
 
-        elif type(self.layers[-1]) in (Dense, AFS, Localunit): # if its not an operation layer
+        elif type(self.layers[-1]) in (Dense, Localunit): # if its not an operation layer
 
           output_layer_errors = [
               error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted, alpha=neuron['alpha'], beta=neuron['beta'])
@@ -1059,7 +1063,7 @@ class Sequential:
         layer_errors = []
         
         ######################################################################################
-        if type(this_layer) in (Dense, AFS, Localunit):
+        if type(this_layer) in (Dense, Localunit):
           
           if type(prev_layer) == Dense:
             
@@ -1072,13 +1076,6 @@ class Sequential:
             for this_neuron_index, neuron in enumerate(this_layer.neurons)
               ]
 
-          elif type(prev_layer) == AFS:
-            layer_errors = [
-            Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
-            prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight']
-            for this_neuron_index, neuron in enumerate(this_layer.neurons)
-            ]
-            
           elif type(prev_layer) == Operation:
             layer_errors = [
                   Key.ACTIVATION_DERIVATIVE[this_layer.activation](this_WS[this_neuron_index], alpha=neuron['alpha'], beta=neuron['beta']) *
@@ -1111,7 +1108,7 @@ class Sequential:
           
           neuron_error = []
           
-          if type(prev_layer) in (Dense, AFS, Operation, Localunit):
+          if type(prev_layer) in (Dense, Operation, Localunit):
             
             if type(prev_layer) == Dense:
               
@@ -1121,13 +1118,6 @@ class Sequential:
 
                 layer_errors.append( sum(neuron_error) )
             
-            elif type(prev_layer) == AFS:
-              for neuron_index, _ in enumerate(this_layer.mask):
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
-
-                layer_errors.append( sum(neuron_error) )
-
             elif type(prev_layer) == Operation:
               for neuron_index, _ in enumerate(this_layer.mask):
                 for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
@@ -1207,7 +1197,7 @@ class Sequential:
         ######################################################################################
         elif type(this_layer) == Flatten:
           
-          if type(prev_layer) in (Dense, AFS, Operation, Localunit):
+          if type(prev_layer) in (Dense, Operation, Localunit):
             for this_neuron_index in range(len(this_layer.neurons)):
 
               neuron_error = []
@@ -1217,11 +1207,6 @@ class Sequential:
                 for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
 
                   neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
-
-              elif type(prev_layer) == AFS:
-                for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
-
-                  neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weight'])
 
               elif type(prev_layer) == Operation:
                 for prev_neuron_index, prev_neuron in enumerate(prev_layer.neurons):
@@ -1357,10 +1342,6 @@ class Sequential:
                 neuron_error.append(prev_errors[prev_neuron_index] * prev_neuron['weights'][this_neuron_index])
 
               layer_errors.append( derivative * sum(neuron_error) )
-
-            elif type(prev_layer) == AFS:
-
-              layer_errors.append( derivative * prev_errors[this_neuron_index] * prev_layer.neurons[this_neuron_index]['weight'] )
 
             elif type(prev_layer) == Operation:
               layer_errors.append( derivative * prev_errors[this_neuron_index] )
@@ -1533,7 +1514,7 @@ class Sequential:
       return errors
     
     def update(activations, weighted_sum, errors, timestep):
-
+      
       optimize = Key.OPTIMIZER.get(self.optimizer)
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
@@ -1564,17 +1545,20 @@ class Sequential:
               # Update weights
               param_id += 1
               neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, 
-                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                         param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * weight_gradient
               
             # update alpha and beta
             
             param_id += 1
             neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
             
             param_id += 1
             neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
               
             # Updating bias
             bias_gradient = 0
@@ -1587,7 +1571,8 @@ class Sequential:
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                      param_id=param_id, timestep=timestep) if not self.optimize else neuron['bias'] - learning_rate * bias_gradient
 
         elif type(layer) == Convolution and layer.learnable:
           
@@ -1652,7 +1637,7 @@ class Sequential:
 
                   kernel[a][b] = optimize(learning_rate, kernel[a][b], kernel_error[a][b], self.optimizer_instance, 
                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                          param_id=param_id, timestep=timestep)
+                                          param_id=param_id, timestep=timestep) if not self.optimize else kernel[a][b] - learning_rate * kernel_error[a][b]
 
               if layer.use_bias:
                 param_id += 1
@@ -1663,51 +1648,18 @@ class Sequential:
 
                 layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, self.optimizer_instance, 
                                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                                                   param_id=param_id, timestep=timestep)
-
-        elif type(layer) == AFS and layer.learnable:
-
-          for this_neuron_index, _ in enumerate(layer.neurons):
-
-            # calculate weight gradient
-
-            weight_gradient = 0
-
-            for error_versions in errors:
-              weight_gradient += error_versions[this_layer_index][this_neuron_index] * prev_activations[this_neuron_index]
-
-            if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-              weight_gradient /= batchsize
-
-            param_id += 1
-            layer.neurons[this_neuron_index]['weight'] = optimize(learning_rate, layer.neurons[this_neuron_index]['weight'], weight_gradient, self.optimizer_instance, 
-                                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
-
-            # update alpha and beta
-            
-            param_id += 1
-            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
-            
-            param_id += 1
-            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
-              
-            
-            # calculate bias gradient
-            if layer.use_bias:
-              bias_gradient = 0
-
-              for error_versions in errors:
-                bias_gradient += error_versions[this_layer_index][this_neuron_index]
-
-              if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
-                bias_gradient /= batchsize
+                                                                   param_id=param_id, timestep=timestep) if not self.optimize else layer.bias[channel_index][kernel_index] - learning_rate * bias_err
 
               param_id += 1
-              layer.neurons[this_neuron_index]['bias'] = optimize(learning_rate, layer.neurons[this_neuron_index]['bias'], bias_gradient, self.optimizer_instance, 
-                                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
-
+              layer.alphas[channel_index][kernel_index] = optimize(learning_rate, layer.alphas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+              
+              param_id += 1
+              layer.betas[channel_index][kernel_index] = optimize(learning_rate, layer.betas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+              
         elif type(layer) == Localunit and layer.learnable:
 
           for neuron_index, neuron in enumerate(layer.neurons):
@@ -1726,17 +1678,20 @@ class Sequential:
               # Update weights
               param_id += 1
               neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, 
-                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                         param_id=param_id, timestep=timestep) if not self.optimize else neuron['weights'][weight_index] - learning_rate * weight_gradient
 
             # update alpha and beta
             
             param_id += 1
             neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
             
             param_id += 1
             neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
             
             # Updating bias
 
@@ -1750,7 +1705,8 @@ class Sequential:
 
             param_id += 1
             neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                      param_id=param_id, timestep=timestep) if not self.optimize else neuron['bias'] - learning_rate * bias_gradient
 
         elif type(layer) == Recurrent and layer.learnable:
           Wa_gradient = 0
@@ -1769,19 +1725,24 @@ class Sequential:
 
           param_id += 1
           layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, 
-                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if not self.optimize else layer.carry_weight - learning_rate * Wa_gradient
           param_id += 1
           layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, 
-                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if not self.optimize else layer.input_weight - learning_rate * Wb_gradient
           param_id += 1
           layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, 
-                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if not self.optimize else layer.bias - learning_rate * B_gradient
           param_id += 1
           neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
-                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
           param_id += 1
           neuron['beta']  = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
-                                     alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                     alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                     param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
           
         elif type(layer) == LSTM and layer.learnable:
           
@@ -1805,23 +1766,27 @@ class Sequential:
           for index, bias in enumerate(layer.biases):
             param_id += 1
             layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
-                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                           param_id=param_id, timestep=timestep) if not self.optimize else bias - learning_rate * B_ERR[index]
           
           for index, weight in enumerate(layer.short_term_weights):
             param_id += 1
             layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, 
-                                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                       param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * ST_ERR[index]
           
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
             layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
-                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                  param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * INPUT_ERR[index]
           
           for index, weight in enumerate(layer.extra_weights):
             param_id += 1
             if layer.version == 'statquest':
               layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, 
-                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                    param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * EXTRA_ERR[index]
         
         elif type(layer) == GRU and layer.learnable:
           
@@ -1842,20 +1807,24 @@ class Sequential:
           for index, bias in enumerate(layer.biases):
             param_id += 1
             layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
-                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                           param_id=param_id, timestep=timestep) if not self.optimize else bias - learning_rate * B_ERR[index]
 
           for index, weight in enumerate(layer.carry_weights):
             param_id += 1
             layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, 
-                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                  param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * C_ERR[index]
 
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
             layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
-                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, param_id=param_id, timestep=timestep)
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                  param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * INPUT_ERR[index]
         
         elif type(layer) == RecurrentBlock:
           
+          # Except for RecurrentBlocks, all layers are susceptible to the 'optimize' override
           layer.internal(3, learning_rate, timestep, self.batchsize)
       
     #################################################################################################
@@ -1920,7 +1889,7 @@ class Sequential:
           layer.set_length(len(arraytools.flatten(x)))
           sizes.append(arraytools.shape(x))
 
-        elif type(layer) in (AFS, Dense, Operation, Localunit):
+        elif type(layer) in (Dense, Operation, Localunit):
           
           if calibrate:
             
@@ -1961,7 +1930,7 @@ class Sequential:
     self.GRU  = any(type(layer) == GRU for layer in self.layers)
     
     # main training loop - iterate over the epochs
-    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=70, empty=' ') if self.verbose==1 else range(epochs):
+    for epoch in utility.progress_bar(range(epochs), "> Training", "Complete", decimals=2, length=100, empty=' ') if self.verbose==1 else range(epochs):
       epoch_loss = 0
       
       # main training section - iterate over the entire dataset
@@ -2013,10 +1982,12 @@ class Sequential:
         if 'frozenTS' in self.experimental:
           timestep = 1
         
-        update(activations, weighted_sums, errors, timestep)
+        difference_between_losses = abs(epoch_loss - self.error_logs[epoch-self.logging]) if epoch > self.logging else 1e+10
+        update(activations, weighted_sums, errors, timestep) if difference_between_losses > skip_threshold or not self.optimize else do_nothing()
+        
         errors = []
 
-      # post-training stuff
+      ########################### post-training stuff ##########################
       
       # log the eror
       epoch_loss /= len(features)
@@ -2122,28 +2093,28 @@ class Sequential:
     results = []
     longest = 0
     
-    for metric_index in (utility.progress_bar(range(len(self.metrics)), f"Evaluating model", "Complete", decimals=2, length=75, empty=' ') if verbose == 1 else range(len(self.metrics))):
+    for metric_index in (utility.progress_bar(range(len(self.metrics)), f"> Evaluating model", "% Complete", decimals=2, length=75, empty=' ') if verbose == 1 else range(len(self.metrics))):
 
       metric = self.metrics[metric_index]
       correct = 0
       predicted = []
       longest = len(metric) if len(metric) > longest else longest
       
-      for i in (utility.progress_bar(range(len(features)), f"Evaluating with {metric}", "Complete", decimals=2, length=75, empty=' ') if verbose == 2 else range(len(features))):
+      for i in (utility.progress_bar(range(len(features)), f"> Evaluating with {metric}", "% Complete", decimals=2, length=75, empty=' ') if verbose == 2 else range(len(features))):
 
         predicted.append(self.push(features[i]))
 
       if metric in Key.METRICS:
-        results.append(Key.METRICS[metric](predicted, targets))
+        results.append( Key.METRICS[metric](predicted, targets) )
       else:
-        results.append(Key.ERROR[metric](targets, predicted))
+        results.append( [Key.ERROR[metric](target, predict) for target, predict in zip(targets, predicted)] )
     
     if logging:
       print("Evaluation Summary:")
       for metric, result in zip(self.metrics, results):
         
         pad = ' ' * (longest - len(metric))
-        print(f"{pad}{metric} | {result}%" if metric in ('accuracy', 'precision', 'recall') else f"{pad}{metric} | {result}")
+        print(f"{pad}{metric} | {result}%" if metric in ('accuracy', 'precision', 'recall') else f"{pad}{metric} | {sum(result)}")
 
     print()    
 
@@ -2234,7 +2205,7 @@ class Sequential:
     
       for layer in self.layers:
         
-        if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, AFS, Operation, Localunit, RecurrentBlock, Dropout):
+        if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Localunit, RecurrentBlock, Dropout):
           raise TypeError(f"Unknown layer type {type(layer)}")
 
         elif type(layer) == Dropout:
@@ -2269,7 +2240,7 @@ class Sequential:
     for layer in self.layers:
       counter += 1
 
-      if type(layer) in (Dense, AFS, Localunit):
+      if type(layer) in (Dense, Localunit):
         traniable_params += len(layer.neurons) * len(layer.neurons[0]['weights']) + 1 if layer.learnable else 0
         non_traniable_params += len(layer.neurons) * len(layer.neurons[0]['weights']) + 1 if not layer.learnable else 0
 
@@ -2277,7 +2248,7 @@ class Sequential:
         traniable_params += len(layer.kernel) * len(layer.kernel[0]) + 1 if layer.learnable else 0
         non_traniable_params += len(layer.kernel) * len(layer.kernel[0]) + 1 if not layer.learnable else 0
 
-      if type(layer) in (Dense, Convolution, AFS, Localunit):
+      if type(layer) in (Dense, Convolution, Localunit):
         learnable = True if layer.learnable else False
         print(f"|   {counter:10} | {layer.__class__.__name__:11} | {str(learnable):10}| {str(self.sizes[counter-1]):11} | {str(self.sizes[counter]):12} | {layer.name:20}")
 
