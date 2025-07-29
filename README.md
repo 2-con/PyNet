@@ -118,3 +118,4 @@ Email: 72212@jisedu.or.id
 PyNet is almost completed, just some additional features and fixing and it should be **mostly** completed by August.
 
 estimated date: August 2025 (uncertian + not guarenteed)
+
