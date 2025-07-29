@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.synapse as net
+import api.netcore as net
 
 import tools.arraytools as tools
 from tools.arraytools import generate_random_array

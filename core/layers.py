@@ -4,17 +4,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import random
 import numpy as np
 
-from tools import arraytools, scaler, utility, visual
+from tools import arraytools, scaler
 from system.defaults import parametric_alpha_default, parametric_beta_default
 from system.config import *
 
 from core import activation as Activation
-from core import derivative as Derivative
-from core import loss as Error
-from core import metric as Metrics
 from core import initialization as Initialization
-import core.optimizer as optimizer
-Optimizer = optimizer.Optimizer  # set global object just in case
 from core.datafield import Datacontainer as dc
 
 class Key:
@@ -443,6 +438,7 @@ class Dense:
     if type(input) != list:
       raise TypeError("input must be a 1D array list")
     if type(input[0]) not in (int, float):
+      print(input)
       raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before a neural network layer")
 
     # iterate over all the neurons
@@ -594,6 +590,7 @@ class Localunit:
 
 # AFS might be deprecated since its a specialized version of Localunit without contributing anything of value.
 # consider removing this layer before it becomes a technical debt
+@PendingDeprecationWarning
 class AFS:
   def __init__(self, activation, **kwargs):
     """
@@ -827,7 +824,6 @@ class GRU:
     -----
     Args
     -----
-    - activation           (string)  : the activation function to use for the attention layer
     - (Optional) input     (boolean) : accept an input during propagation, on by default
     - (Optional) output    (boolean) : return anything during propagation, on by default
     - (Optional) learnable (boolean) : whether or not to learn, on by default
@@ -846,7 +842,7 @@ class GRU:
     self.carry_weights = [random.uniform(-STW_RANGE,  STW_RANGE) ] * 3
     self.input_weights = [random.uniform(-INP_RANGE,  INP_RANGE) ] * 3
     self.biases        = [random.uniform(-BIAS_RANGE, BIAS_RANGE)] * 3
-
+  
   def apply(self, input, carry):
     
     # merging the input and carry states

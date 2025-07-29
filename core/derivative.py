@@ -72,8 +72,8 @@ def Mish_derivative(x, **kwargs):
 def Swish_derivative(x, **kwargs):
   return Activation.Swish(x) + Activation.Sigmoid(x) * (1 - Activation.Swish(x))
 
-def Leaky_ReLU_derivative(x, alpha=0.01):
-  return 1 if x > 0 else alpha
+def Leaky_ReLU_derivative(x, **kwargs):
+  return 1 if x > 0 else 0.1
 
 def GELU_derivative(x, **kwargs):
   cdf = 0.5 * (1.0 + math.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x**3)))

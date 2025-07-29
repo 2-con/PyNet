@@ -1,5 +1,5 @@
 """
-PyNet Flash
+PyNet Alpha
 ==========
   A simple implementation of a Neural Network in Python, the predecessor to PyNet. A bare-bones version of Synapse API
   with a lot of features absent. What it lacks in complexity it makes up for in speed.
@@ -16,7 +16,6 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import random
-import math
 
 from core.activation import ReLU
 from core.derivative import ReLU_derivative

@@ -1,7 +1,7 @@
 """
-Synapse API
+NetCore API
 =====
-  A high-level API for sequential models of neural networks, Synapse automatically handles the learning
+  A high-level API for sequential models for all things machine learning, NetCore automatically handles the learning
   process along with hyperparameters unless specified. things such as input neurons do not need
   to be defined and are handled automatically.
 -----
@@ -39,7 +39,7 @@ __package__ = "pynet"
 if __name__ == "__main__":
   print("""
         This file is not meant to be run as a main file.
-        More information can be found about PyNet's Synapse API on the documentation.
+        More information can be found about PyNet's NetCore API on the documentation.
         system > 'docs.txt' or the GitHub repository at https://github.com/2-con/PyNet
         """)
   exit()
@@ -61,12 +61,12 @@ from core import metric as Metrics
 from core import initialization as Initialization
 from core import parametric_derivative as P_Derivative
 from core.utility import *
+
 from system.config import *
+from system.defaults import *
 
 from core.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
 import core.optimizer as optimizer
-
-Optimizer = optimizer.Optimizer # initialize the optimizer instance
 
 #######################################################################################################
 #                                               Extra                                                 #
@@ -395,19 +395,19 @@ class Key:
   }
 
   OPTIMIZER = {
-    'adam': Optimizer.Adam,
-    'rmsprop': Optimizer.RMSprop,
-    'adagrad': Optimizer.Adagrad,
-    'amsgrad': Optimizer.Amsgrad,
-    'adadelta': Optimizer.Adadelta,
-    'gradclip': Optimizer.Gradclip,
-    'adamax': Optimizer.Adamax,
-    'sgnd': Optimizer.SGND,
-    'default': Optimizer.Default,
-    'none': Optimizer.Default,
-    'rprop': Optimizer.Rprop,
-    'momentum': Optimizer.Momentum,
-    'novograd': Optimizer.Novograd,
+    'adam': optimizer.Adam,
+    'rmsprop': optimizer.RMSprop,
+    'adagrad': optimizer.Adagrad,
+    'amsgrad': optimizer.Amsgrad,
+    'adadelta': optimizer.Adadelta,
+    'gradclip': optimizer.Gradclip,
+    'adamax': optimizer.Adamax,
+    'sgnd': optimizer.SGND,
+    'default': optimizer.Default,
+    'none': optimizer.Default,
+    'rprop': optimizer.Rprop,
+    'momentum': optimizer.Momentum,
+    'novograd': optimizer.Novograd,
   }
 
   METRICS = {
@@ -451,7 +451,7 @@ class Sequential:
     ======
       Sequential model where layers are processed sequentially.
       
-      Must contain Synapse layers to be added to the model. either directly through the constructor or through the add() method
+      Must contain NetCore layers to be added to the model. either directly through the constructor or through the add() method
     -----
 
     Available layers:
@@ -491,8 +491,6 @@ class Sequential:
     self.error_logs = []
     self.validation_error_logs = []
 
-    self.optimizer_instance = Optimizer()
-
   def add(self, layer):
     """
     Add
@@ -501,7 +499,7 @@ class Sequential:
     -----
     Args
     -----
-    - layer (synapse object) : the layer to add to the model
+    - layer (NetCore object) : the layer to add to the model
     """
     if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Localunit, RecurrentBlock):
       raise ValueError("layer must be of type Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape or RecurrentBlock")
@@ -526,7 +524,7 @@ class Sequential:
     
     - (Optional) early_stopping   (bool)  : whether or not to use early stopping, Evaluates based on the validation set. Defaults to False
     - (Optional) patience         (bool)  : how many epochs to wait before early stopping, defaults to 5
-    - (Optional) validation       (bool)  : the metrics for validation, defaults to the loss
+    - (Optional) validation_loss  (str)   : the metrics for validation, defaults to the loss
     - (Optional) validation_split (float) : controls how much of the training data is used for validation, defaults to 0 (ranges from 0 to 1)
     - (Optional) batchsize        (int)   : batch size, defaults to 1
     - (Optional) initialization   (int)   : weight initialization
@@ -535,12 +533,15 @@ class Sequential:
     - (Optional) logging          (int)   : how often to show training stats
     - (Optional) optimize         (int)   : speed up training by overriding PyNet overhead and cut corners. This disables optimizers, parametrics and skips training when possible.
     
-    Weight and bias optimizer hyperparameters
+    Verbosity Levels
     -----
-    - (Optional) optimizer_alpha    (float)
-    - (Optional) optimizer_beta     (float)
-    - (Optional) optimizer_gamma    (float)
-    - (Optional) optimizer_epsilon  (float)
+    - 0 : None
+    - 1 : Progress bar of the whole training process
+    - 2 : Progress bar of each epoch
+    - 3 : Numerical output containing the loss of each epoch
+    - 4 : Numerical output containing the loss and difference from the previous epoch
+    - 5 : Numerical output containing the loss, difference from the previous epoch and the validation loss
+    - 6 : Numerical output containing the loss, difference from the previous epoch, validation loss and validation difference
     
     Optimizers
     -----
@@ -577,6 +578,13 @@ class Sequential:
     - roc auc
     - r2 score
     
+    Weight and bias optimizer hyperparameters
+    -----
+    - (Optional) optimizer_alpha    (float)
+    - (Optional) optimizer_beta     (float)
+    - (Optional) optimizer_gamma    (float)
+    - (Optional) optimizer_epsilon  (float)
+    
     Experimental settings
     -----
     - 'fullgrad'
@@ -592,7 +600,7 @@ class Sequential:
     self.experimental     = kwargs.get('experimental', [])
     self.stopping         = kwargs.get('early_stopping', False)
     self.patience         = kwargs.get('patience', 5)
-    self.validation       = kwargs.get('validation', loss.lower())
+    self.validation       = kwargs.get('validation_loss', loss.lower())
     self.validation_split = kwargs.get('validation_split', 0)
     
     self.optimize = kwargs.get('optimize', False)
@@ -650,6 +658,9 @@ class Sequential:
         raise ValueError(f"Invalid metric: {metric}")
     if self.loss not in Key.ERROR:
       raise ValueError(f"Invalid loss: {self.loss}")
+    
+    # the actual compiling happens in the fit() method
+    # this is to allow for an adaptive input shape
 
   # processing
   
@@ -1515,7 +1526,12 @@ class Sequential:
     
     def update(activations, weighted_sum, errors, timestep):
       
-      optimize = Key.OPTIMIZER.get(self.optimizer)
+      # optimizers
+      
+      storage_1 = {}
+      storage_2 = {}
+      
+      optimize = Key.OPTIMIZER[self.optimizer]
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       batchsize = self.batchsize
@@ -1544,21 +1560,21 @@ class Sequential:
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, 
+              neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, storage_1, storage_2, 
                                                          alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                          param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * weight_gradient
               
             # update alpha and beta
             
             param_id += 1
-            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, storage_1, storage_2, 
                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
             
             param_id += 1
-            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, storage_1, storage_2, 
                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
               
             # Updating bias
             bias_gradient = 0
@@ -1570,7 +1586,7 @@ class Sequential:
               bias_gradient /= batchsize
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, 
                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                       param_id=param_id, timestep=timestep) if not self.optimize else neuron['bias'] - learning_rate * bias_gradient
 
@@ -1635,7 +1651,7 @@ class Sequential:
                   if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
                     weight_gradient[a][b] /= batchsize
 
-                  kernel[a][b] = optimize(learning_rate, kernel[a][b], kernel_error[a][b], self.optimizer_instance, 
+                  kernel[a][b] = optimize(learning_rate, kernel[a][b], kernel_error[a][b], storage_1, storage_2, 
                                           alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                           param_id=param_id, timestep=timestep) if not self.optimize else kernel[a][b] - learning_rate * kernel_error[a][b]
 
@@ -1646,19 +1662,19 @@ class Sequential:
                   # visual.numerical_display(bias_gradients)
                   bias_gradients = [(b / batchsize for b in a) for a in bias_gradients]
 
-                layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, self.optimizer_instance, 
+                layer.bias[channel_index][kernel_index] = optimize(learning_rate, layer.bias[channel_index][kernel_index], bias_err, storage_1, storage_2, 
                                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                                    param_id=param_id, timestep=timestep) if not self.optimize else layer.bias[channel_index][kernel_index] - learning_rate * bias_err
 
               param_id += 1
-              layer.alphas[channel_index][kernel_index] = optimize(learning_rate, layer.alphas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+              layer.alphas[channel_index][kernel_index] = optimize(learning_rate, layer.alphas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](layer.bias[channel_index][kernel_index], 'alpha', alpha=layer.alphas[channel_index][kernel_index], beta=layer.betas[channel_index][kernel_index]) * weight_gradient, storage_1, storage_2, 
                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
               
               param_id += 1
-              layer.betas[channel_index][kernel_index] = optimize(learning_rate, layer.betas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+              layer.betas[channel_index][kernel_index] = optimize(learning_rate, layer.betas[channel_index][kernel_index], Key.PARAMETRIC_DERIVATIVE[layer.activation](layer.bias[channel_index][kernel_index], 'beta', alpha=layer.alphas[channel_index][kernel_index], beta=layer.betas[channel_index][kernel_index]) * weight_gradient, storage_1, storage_2, 
                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                        param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
               
         elif type(layer) == Localunit and layer.learnable:
 
@@ -1677,21 +1693,21 @@ class Sequential:
 
               # Update weights
               param_id += 1
-              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, self.optimizer_instance, 
+              neuron['weights'][weight_index] = optimize(learning_rate, neuron['weights'][weight_index], weight_gradient, storage_1, storage_2, 
                                                          alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                          param_id=param_id, timestep=timestep) if not self.optimize else neuron['weights'][weight_index] - learning_rate * weight_gradient
 
             # update alpha and beta
             
             param_id += 1
-            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+            neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, storage_1, storage_2, 
                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                       param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
             
             param_id += 1
-            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, self.optimizer_instance, 
+            neuron['beta'] = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=neuron['alpha'], beta=neuron['beta']) * weight_gradient, storage_1, storage_2, 
                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
             
             # Updating bias
 
@@ -1704,7 +1720,7 @@ class Sequential:
               bias_gradient /= batchsize
 
             param_id += 1
-            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, 
+            neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, 
                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                       param_id=param_id, timestep=timestep) if not self.optimize else neuron['bias'] - learning_rate * bias_gradient
 
@@ -1724,25 +1740,25 @@ class Sequential:
             B_gradient  /= batchsize
 
           param_id += 1
-          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, self.optimizer_instance, 
+          layer.carry_weight = optimize(learning_rate, layer.carry_weight, Wa_gradient, storage_1, storage_2, 
                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                         param_id=param_id, timestep=timestep) if not self.optimize else layer.carry_weight - learning_rate * Wa_gradient
           param_id += 1
-          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, self.optimizer_instance, 
+          layer.input_weight = optimize(learning_rate, layer.input_weight, Wb_gradient, storage_1, storage_2, 
                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                         param_id=param_id, timestep=timestep) if not self.optimize else layer.input_weight - learning_rate * Wb_gradient
           param_id += 1
-          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, self.optimizer_instance, 
+          layer.bias         = optimize(learning_rate, layer.bias, B_gradient, storage_1, storage_2, 
                                         alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                         param_id=param_id, timestep=timestep) if not self.optimize else layer.bias - learning_rate * B_gradient
           param_id += 1
-          neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
+          neuron['alpha'] = optimize(learning_rate, neuron['alpha'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'alpha', alpha=layer.alpha, beta=layer.beta) * weight_gradient, storage_1, storage_2, 
                                       alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                      param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
           param_id += 1
-          neuron['beta']  = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=layer.alpha, beta=layer.beta) * weight_gradient, self.optimizer_instance, 
+          neuron['beta']  = optimize(learning_rate, neuron['beta'], Key.PARAMETRIC_DERIVATIVE[layer.activation](this_WS[neuron_index], 'beta', alpha=layer.alpha, beta=layer.beta) * weight_gradient, storage_1, storage_2, 
                                      alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
-                                     param_id=param_id, timestep=timestep) if layer.activation in parametrics or not self.optimize else 1
+                                     param_id=param_id, timestep=timestep) if layer.activation in parametrics and not self.optimize else do_nothing()
           
         elif type(layer) == LSTM and layer.learnable:
           
@@ -1765,26 +1781,26 @@ class Sequential:
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
-            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], storage_1, storage_2, 
                                            alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                            param_id=param_id, timestep=timestep) if not self.optimize else bias - learning_rate * B_ERR[index]
           
           for index, weight in enumerate(layer.short_term_weights):
             param_id += 1
-            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, 
+            layer.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], storage_1, storage_2, 
                                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                        param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * ST_ERR[index]
           
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
-            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], storage_1, storage_2, 
                                                   alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                   param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * INPUT_ERR[index]
           
           for index, weight in enumerate(layer.extra_weights):
             param_id += 1
             if layer.version == 'statquest':
-              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, 
+              layer.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], storage_1, storage_2, 
                                                     alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                     param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * EXTRA_ERR[index]
         
@@ -1806,19 +1822,19 @@ class Sequential:
           
           for index, bias in enumerate(layer.biases):
             param_id += 1
-            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, 
+            layer.biases[index] = optimize(learning_rate, bias, B_ERR[index], storage_1, storage_2, 
                                            alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                            param_id=param_id, timestep=timestep) if not self.optimize else bias - learning_rate * B_ERR[index]
 
           for index, weight in enumerate(layer.carry_weights):
             param_id += 1
-            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, 
+            layer.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], storage_1, storage_2, 
                                                   alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                   param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * C_ERR[index]
 
           for index, weight in enumerate(layer.input_weights):
             param_id += 1
-            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, 
+            layer.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], storage_1, storage_2, 
                                                   alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
                                                   param_id=param_id, timestep=timestep) if not self.optimize else weight - learning_rate * INPUT_ERR[index]
         
@@ -1917,7 +1933,12 @@ class Sequential:
 
         elif type(layer) == RecurrentBlock:
           
-          layer.calibrate(self.optimizer, self.loss, self.learning_rate)
+          if len(x) != len(layer.layers):
+            raise SystemError(f"Mismatch between input size and recurrent block units in layer {layer_index + 1}. Expected {len(x)} but got {len(layer.layers)} units.")
+          
+          layer.calibrate(self.optimizer, self.loss, self.learning_rate,
+                          alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma,
+                          optimize=self.optimize)
           x = layer.apply(x)
           sizes.append(arraytools.shape(x))
             
@@ -1934,7 +1955,7 @@ class Sequential:
       epoch_loss = 0
       
       # main training section - iterate over the entire dataset
-      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch)/(epochs-1))*100 , 2)})%", decimals=2, length=70, empty=' ') if self.verbose==2 else range(0, len(features), self.batchsize):
+      for base_index in utility.progress_bar(range(0, len(features), self.batchsize), "> Processing Batch", f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch)/(epochs-1))*100 , 2)})%", decimals=2, length=100, empty=' ') if self.verbose==2 else range(0, len(features), self.batchsize):
         
         # main batching loop - iterate through the batches
         for batch_index in range(self.batchsize):
@@ -2030,8 +2051,7 @@ class Sequential:
         if all(validation_loss > err for err in patience_scope):
           break
       
-      if epoch % self.logging == 0 and self.verbose>=3:
-        
+      if epoch % self.logging == 0 and self.verbose >= 2:
         prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{epochs-1} ({round( ((epoch+1)/epochs)*100 , 2)}%)"
         pad                 = ' ' * ( len(f"Epoch {epochs}/{epochs-1} (100.0%)") - len(prefix))
         suffix              = f" | Loss: {str(epoch_loss):22}"
@@ -2084,6 +2104,12 @@ class Sequential:
     - targets            (list) : the corresponding targets to use
     - (optional) verbose (int)  : wether to show anything on screen
     - (optional) logging (bool) : wether to print out results after evaluating the model
+    
+    Verbosity Levels
+    -----
+    - 0 : None
+    - 1 : Whole process (progress bar)
+    - 2 : Per metric (progress bar)
     """
     self.is_validated = True
     
@@ -2096,7 +2122,6 @@ class Sequential:
     for metric_index in (utility.progress_bar(range(len(self.metrics)), f"> Evaluating model", "% Complete", decimals=2, length=75, empty=' ') if verbose == 1 else range(len(self.metrics))):
 
       metric = self.metrics[metric_index]
-      correct = 0
       predicted = []
       longest = len(metric) if len(metric) > longest else longest
       
@@ -2114,7 +2139,7 @@ class Sequential:
       for metric, result in zip(self.metrics, results):
         
         pad = ' ' * (longest - len(metric))
-        print(f"{pad}{metric} | {result}%" if metric in ('accuracy', 'precision', 'recall') else f"{pad}{metric} | {sum(result)}")
+        print(f"{pad}{metric} | {result}%" if metric in ('accuracy', 'precision', 'recall') else f"{pad}{metric} | {sum(result)/len(result)}")
 
     print()    
 
@@ -2296,8 +2321,6 @@ class RecurrentBlock:
     self.WS             = None
     self.errors         = []
 
-    self.optimizer_instance = Optimizer()
-
   # executed once
   def calibrate(self, optimizer, loss, learning_rate, **kwargs):
     """
@@ -2307,11 +2330,12 @@ class RecurrentBlock:
     self.loss = loss.lower()
     self.learning_rate = learning_rate
 
-    self.alpha = kwargs.get('alpha', None)
-    self.beta = kwargs.get('beta', None)
-    self.epsilon = kwargs.get('epsilon', None) # zerodivison prevention
-    self.gamma = kwargs.get('gamma', None)
-    self.delta = kwargs.get('delta', None)
+    self.optimizer_alpha = kwargs.get('alpha', None)
+    self.optimizer_beta = kwargs.get('beta', None)
+    self.optimizer_epsilon = kwargs.get('epsilon', None) # zerodivison prevention
+    self.optimizer_gamma = kwargs.get('gamma', None)
+    self.optimizer_delta = kwargs.get('delta', None)
+    self.optimize = kwargs.get('optimize', False)
 
     self.experimental = kwargs.get('experimental', [])
     
@@ -2422,7 +2446,6 @@ class RecurrentBlock:
 
       errors = [0] * len(self.layers)
       
-
       output_layer_errors = []
 
       if type(self.layers[-1]) == Recurrent: # if its a recurrent layer
@@ -2573,7 +2596,7 @@ class RecurrentBlock:
         
       errors[-1] = output_layer_errors
     
-    # if its a RNN, LSTM or GRU layer
+      # if its a RNN, LSTM or GRU layer
       for branch_index in reversed(range(len(self.layers)-1)):
         # FRONT | next layer --> this layer --> previous layer | BACK
         # dont forget that this is a parralel class.
@@ -2582,7 +2605,7 @@ class RecurrentBlock:
         this_activations = activations[branch_index]
         this_WS          = weighted_sums[branch_index]
 
-        prev_errors = errors[branch_index - 1]
+        prev_errors = errors[branch_index + 1]
 
         layer_errors = []
 
@@ -2736,19 +2759,16 @@ class RecurrentBlock:
         
         errors[branch_index] = layer_errors[:]
 
-      self.errors = errors
+      self.errors.append(errors)
       return RNN_input_err
       
     def update(learning_rate, timestep, batchsize):
       errors = self.errors[:]
       
-      alpha = self.alpha
-      beta = self.beta
-      epsilon = self.epsilon
-      gamma = self.gamma
-      delta = self.delta
+      storage_1 = {}
+      storage_2 = {}
 
-      optimize = Key.OPTIMIZER.get(self.optimizer)
+      optimize = Key.OPTIMIZER[self.optimizer]
 
       param_id = 0 # must be a positive integer
 
@@ -2771,12 +2791,26 @@ class RecurrentBlock:
             B_gradient  /= batchsize
 
           param_id += 1
-          branch.carry_weight = optimize(learning_rate, branch.carry_weight, Wa_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          branch.carry_weight = optimize(learning_rate, branch.carry_weight, Wa_gradient, storage_1, storage_2, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if not self.optimize else branch.carry_weight - learning_rate * Wa_gradient
           param_id += 1
-          branch.input_weight = optimize(learning_rate, branch.input_weight, Wb_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          branch.input_weight = optimize(learning_rate, branch.input_weight, Wb_gradient, storage_1, storage_2, 
+                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                        param_id=param_id, timestep=timestep) if not self.optimize else branch.input_weight - learning_rate * Wb_gradient
           param_id += 1
-          branch.bias         = optimize(learning_rate, branch.bias, B_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
-        
+          branch.bias = optimize(learning_rate, branch.bias, B_gradient, storage_1, storage_2, 
+                                alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                param_id=param_id, timestep=timestep) if not self.optimize else branch.bias - learning_rate * B_gradient
+          param_id += 1
+          branch.alpha = optimize(learning_rate, branch.alpha, Key.PARAMETRIC_DERIVATIVE[branch.activation](self.WS[branch_index], 'alpha', alpha=branch.alpha, beta=branch.beta) * (Wa_gradient + Wb_gradient), storage_1, storage_2, 
+                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                  param_id=param_id, timestep=timestep) if branch.activation in parametrics or not self.optimize else 1
+          param_id += 1
+          branch.beta  = optimize(learning_rate, branch.alpha, Key.PARAMETRIC_DERIVATIVE[branch.activation](self.WS[branch_index], 'beta', alpha=branch.alpha, beta=branch.beta) * (Wa_gradient + Wb_gradient), storage_1, storage_2, 
+                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                  param_id=param_id, timestep=timestep) if branch.activation in parametrics or not self.optimize else 1
+          
         elif type(branch) == LSTM and branch.learnable:
           
           B_ERR     = [0] * 4 # biases (merge)
@@ -2798,20 +2832,28 @@ class RecurrentBlock:
           
           for index, bias in enumerate(branch.biases):
             param_id += 1
-            branch.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.biases[index] = optimize(learning_rate, bias, B_ERR[index], storage_1, storage_2, 
+                                            alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                            param_id=param_id, timestep=timestep) if not self.optimize else branch.biases[index] - learning_rate * B_ERR[index]
           
           for index, weight in enumerate(branch.short_term_weights):
             param_id += 1
-            branch.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.short_term_weights[index] = optimize(learning_rate, weight, ST_ERR[index], storage_1, storage_2, 
+                                                        alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                        param_id=param_id, timestep=timestep) if not self.optimize else branch.short_term_weights[index] - learning_rate * ST_ERR[index]
           
           for index, weight in enumerate(branch.input_weights):
             param_id += 1
-            branch.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], storage_1, storage_2, 
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                  param_id=param_id, timestep=timestep) if not self.optimize else branch.input_weights[index] - learning_rate * INPUT_ERR[index]
           
           for index, weight in enumerate(branch.extra_weights):
             param_id += 1
             if branch.version == 'statquest':
-              branch.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+              branch.extra_weights[index] = optimize(learning_rate, weight, EXTRA_ERR[index], storage_1, storage_2, 
+                                                    alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                    param_id=param_id, timestep=timestep) if not self.optimize else branch.extra_weights[index] - learning_rate * EXTRA_ERR[index]
         
         elif type(branch) == GRU and branch.learnable:
           
@@ -2820,6 +2862,7 @@ class RecurrentBlock:
           INPUT_ERR = [0] * 3 # input weights
           
           for error_version in errors:
+            
             B_ERR     = [B_ERR[i]     + error_version[branch_index][1][i] for i in range(3)]
             C_ERR     = [C_ERR[i]     + error_version[branch_index][2][i] for i in range(3)]
             INPUT_ERR = [INPUT_ERR[i] + error_version[branch_index][3][i] for i in range(3)]
@@ -2831,16 +2874,25 @@ class RecurrentBlock:
           
           for index, bias in enumerate(branch.biases):
             param_id += 1
-            branch.biases[index] = optimize(learning_rate, bias, B_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.biases[index] = optimize(learning_rate, bias, B_ERR[index], storage_1, storage_2, 
+                                            alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                            param_id=param_id, timestep=timestep) if not self.optimize else branch.biases[index] - learning_rate * B_ERR[index]
 
           for index, weight in enumerate(branch.carry_weights):
             param_id += 1
-            branch.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.carry_weights[index] = optimize(learning_rate, weight, C_ERR[index], storage_1, storage_2, 
+                                                   alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                    param_id=param_id, timestep=timestep) if not self.optimize else branch.carry_weights[index] - learning_rate * C_ERR[index]
 
           for index, weight in enumerate(branch.input_weights):
             param_id += 1
-            branch.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+            branch.input_weights[index] = optimize(learning_rate, weight, INPUT_ERR[index], storage_1, storage_2, 
+                                                  alpha=self.optimizer_alpha, beta=self.optimizer_beta, epsilon=self.optimizer_epsilon, gamma=self.optimizer_gamma, 
+                                                  param_id=param_id, timestep=timestep) if not self.optimize else branch.input_weights[index] - learning_rate * INPUT_ERR[index]
 
+      # clear memory to prevent memory leaks
+      self.errors = []
+      
     if procedure == 1:
       Propagate(*args)
     
@@ -2920,3 +2972,4 @@ class RecurrentBlock:
     
     else:
       raise ValueError("Internal attribute not set.")
+

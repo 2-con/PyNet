@@ -47,7 +47,7 @@ def Swish(x, **kwargs):
   return x * Sigmoid(x)
 
 def Leaky_ReLU(x, **kwargs):
-  return max(0.01 * x, x)
+  return max(0.1 * x, x)
 
 def GELU(x, **kwargs):
   if x>10:
