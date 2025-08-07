@@ -1,41 +1,66 @@
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.alpha as alpha
+import jax.numpy as jnp
+import jax
+from api.netflash import Sequential
+from core.flash.layers import *
 from tools.arraytools import generate_random_array
-from core.loss import Mean_squared_error as mse
-from core.activation import *
-from core.derivative import *
-from tools.utility import progress_bar
+from tools.visual import array_display
 import time
 
-features = generate_random_array(100,100)
-targets = generate_random_array(10,100)
+# Example Usage
+model = Sequential(
+  Flatten(),
+  Dense(2, 'leaky relu'),
+)
 
-model = alpha.initialize(100,32,10)
+# Compile the model
+model.compile(
+  input_shape=(2,2),
+  optimizer='default',
+  loss='mean squared error',
+  learning_rate=0.001,
+  epochs=1000,
+  metrics=['accuracy'],
+  batch_size=4,
+  verbose=3,
+  logging=100
+)
 
-start_time = time.perf_counter()
+# Generate some dummy data for training
+features = jnp.array([
+  # [1,1],
+  # [2,2],
+  # [3,3],
+  # [4,4]
+  
+[[1,2],
+ [3,4]],
 
-for epoch in progress_bar(range(100), "> Training", "%  Complete") if True else range(100):
-  for feature, target in zip(features, targets):
-    activations, weighted_sums = alpha.propagate(model, feature, ELU)
-    error = alpha.backpropegate(model, activations, weighted_sums, target, ELU_derivative)
-    
-    alpha.update(model, activations, error, 0.001)
+[[5,6],
+ [7,8]],
 
-  # if epoch % 10 == 0:
-  #   print(f"Epoch {epoch:5} | Error {mse(target, activations[-1])}")
+[[9,10],
+ [11,12]],
 
-end_time = time.perf_counter()
-duration = end_time - start_time
+[[13,14],
+ [15,16]]
+])
+targets = jnp.array([
+  [1,1],
+  [2,2],
+  [3,3],
+  [4,4]
+])
+
+# Fit the model
+start = time.perf_counter()
+
+model.fit(features, targets)
+
 print(f"""
-      finished training in {duration} seconds
+      Finished training in {time.perf_counter() - start} seconds
       """)
 
-all_error = []
-
-for feature, target in zip(features, targets):
-  activations, _ = alpha.propagate(model, feature, ReLU)
-  all_error.append(mse(target, activations[-1]))
-
-print(f"Average error: {sum(all_error) / len(all_error)}")
+# array_display(model.push(features).tolist())

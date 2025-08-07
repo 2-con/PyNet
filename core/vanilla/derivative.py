@@ -2,7 +2,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from system.defaults import *
 import math
-import core.activation as Activation
+import core.vanilla.activation as Activation
 
 # scalers
 
@@ -93,7 +93,7 @@ def ReEU_derivative(x, **kwargs):
 def Linear_derivative(x, **kwargs):
   return 1
 
-def TANDIP_derivative(x, **kwargs):
+def ReTanh_derivative(x, **kwargs):
   if x > 0:
     return 1
   else:

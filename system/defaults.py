@@ -24,6 +24,6 @@ SiLU_alpha_default = 1.0
 parametric_alpha_default = 1.0
 parametric_beta_default = 1.0
 
-# optimizer hyperparameters
+# zerodiv prevention
 
-momentum_default = 0.9
+epsilon_default = 1e-10

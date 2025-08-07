@@ -20,10 +20,13 @@ def Accuracy(y_true: list, y_pred: list):
   """
   if not y_true:
     return 0.0
+  
   correct = 0
+  
   for true, pred in zip(y_true, y_pred):
     if argmax(true) == argmax(pred):
       correct += 1
+      
   return (correct / len(y_true)) * 100
 
 def Precision(y_true: list, y_pred: list):

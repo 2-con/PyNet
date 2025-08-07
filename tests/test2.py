@@ -5,33 +5,33 @@ import api.netcore as net
 import time
 from tools.arraytools import generate_random_array
 
-features = generate_random_array(100,100)
+features = generate_random_array(784,100)
 targets = generate_random_array(10,100)
 
 model = net.Sequential(
-  # net.Dense(64, 'relu'),
-  # net.Dense(64, 'relu'),
-  net.Dense(32, 'elu'),
-  net.Dense(10, 'elu'),
+  net.Dense(64, 'relu'),
+  net.Dense(64, 'relu'),
+  net.Dense(10, 'relu'),
+  # net.Operation('softmax'),
 )
 
 model.compile(
   optimizer='none',
   loss='mean squared error',
-  learning_rate=0.1,
-  epochs=100,
+  learning_rate=1.0,
+  epochs=10,
   metrics=['mean squared error'],
-  logging=10,
-  verbose=1,
-  optimize=True
+  logging=1,
+  verbose=2,
+  optimize=False
 )
 
 start_time = time.perf_counter()
+
 model.fit(features, targets)
-end_time = time.perf_counter()
-duration = end_time - start_time
+
 print(f"""
-      finished training in {duration} seconds
+      finished training in {time.perf_counter() - start_time} seconds
       """)
 
 model.evaluate(

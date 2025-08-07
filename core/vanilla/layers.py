@@ -8,9 +8,9 @@ from tools import arraytools, scaler
 from system.defaults import parametric_alpha_default, parametric_beta_default
 from system.config import *
 
-from core import activation as Activation
-from core import initialization as Initialization
-from core.datafield import Datacontainer as dc
+from core.vanilla import activation as Activation
+from core.vanilla import initialization as Initialization
+from core.vanilla.datafield import Datacontainer as dc
 
 class Key:
 
@@ -24,7 +24,7 @@ class Key:
     'gelu': Activation.GELU,
     'reeu': Activation.ReEU,
     'none': Activation.Linear,
-    'tandip': Activation.TANDIP,
+    'retanh': Activation.ReTanh,
 
     # normalization functions
     'binary step': Activation.Binary_step,
@@ -380,9 +380,9 @@ class Dense:
     self.activation = activation.lower()
     self.input_shape = kwargs.get('input_shape', 0)
     
-    if activation.lower() in parametric_rectifiers or activation.lower() in static_rectifiers:
+    if activation.lower() in rectifiers:
       default_initializer = 'he normal'
-    elif activation.lower() in normalization_functions or activation.lower() in parametric_normalization_functions:
+    elif activation.lower() in normalization:
       default_initializer = 'glorot normal'
     else:
       raise ValueError(f"Unknown activation function: '{activation}'")
@@ -587,111 +587,6 @@ class Localunit:
 
       answer.append(dot_product + self.neurons[a]['bias'])
     return answer
-
-# AFS might be deprecated since its a specialized version of Localunit without contributing anything of value.
-# consider removing this layer before it becomes a technical debt
-@PendingDeprecationWarning
-class AFS:
-  def __init__(self, activation, **kwargs):
-    """
-    Adaptive Feature Scaler
-    -----
-      Experimental layer, use a 'None' activation function for a traditional AFS layer, else its no longer
-      a scaler layer anymore.
-    -----
-    Args
-    -----
-    - activation           (string)  : the activation function to use for the attention layer
-    - (Optional) bias      (boolean) : whether or not to use bias
-    - (Optional) learnable (boolean) : whether or not to learn
-    - (Optional) name      (string)  : the name of the layer
-    -----
-    Activation functions
-    - ReLU
-    - Softplus
-    - Mish
-    - Swish
-    - Leaky ReLU
-    - GELU
-    - ReEU
-    - None
-    - TANDIP
-
-    Normalization functions
-    - Binary Step
-    - Softsign
-    - Sigmoid
-    - Tanh
-    
-    Parametric functions
-    - ELU
-    - SELU
-    - PReLU
-    - SiLU
-      
-    Initialization
-    - Xavier uniform in
-    - Xavier uniform out
-    - He uniform
-    - Glorot uniform
-    - LeCun uniform
-    - He normal
-    - Glorot normal
-    - LeCun normal
-    - Default
-    - None
-    """
-    self.activation = activation.lower()
-    self.name = kwargs.get('name', 'feature scaler')
-    self.learnable = kwargs.get('learnable', True)
-    self.use_bias = kwargs.get('bias', True)
-    
-    if activation.lower() in parametric_rectifiers or activation.lower() in static_rectifiers:
-      default_initializer = 'he normal'
-    elif activation.lower() in normalization_functions or activation.lower() in parametric_normalization_functions:
-      default_initializer = 'glorot normal'
-    else:
-      raise ValueError(f"Unknown activation function: '{activation}'")
-    
-    self.initialization = kwargs.get('initialization', default_initializer).lower()
-
-    neuron = {
-      'weight': 0,
-      'bias': 0
-      }
-    self.neurons = [neuron]
-
-  def reshape_input_shape(self, input_shape, output_shape):
-
-    self.neurons = [
-      {
-      'weight': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
-      'bias': Key.INITIALIZATION[self.initialization](input_shape, output_shape),
-      'alpha': parametric_alpha_default,
-      'beta': parametric_beta_default
-      }
-      for _ in range(input_shape)
-    ]
-
-  def apply(self, input):
-
-    return [Key.ACTIVATION[self.activation](
-      self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias'], 
-      alpha=self.neurons[i]['alpha'], 
-      beta=self.neurons[i]['beta']
-      ) for i in range(len(input))
-    ]
-
-  def get_weighted_sum(self, input: list):
-    self.input = input[:]
-    answer = []
-
-    if type(input) != list:
-      raise TypeError("input must be a 1D array list")
-    if type(input[0]) not in (int, float):
-      raise TypeError("input must be a 1D array list \nuse the built-in 'Flatten' layer before an AFS layer")
-
-    return [self.neurons[i]['weight'] * input[i] + self.neurons[i]['bias'] for i in range(len(input))]
 
 class Recurrent:
   def __init__(self, activation, **kwargs):
@@ -936,51 +831,6 @@ class Maxpooling:
 
     return multichannel_ans
 
-class Maxpooling2D:
-  def __init__(self, size, stride, **kwargs):
-    """
-    Meanpooling
-    -----
-      Scales down any 2D array by pooling, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - size            (int)  : the size of the pooling window
-    - stride          (int)  : the stride of the pooling window
-    - (Optional) name (string) : the name of the layer
-    """
-    self.size = size
-    self.stride = stride
-    self.name = kwargs.get('name', 'maxpooling')
-    self.input_size = 0
-
-  def apply(self, input):
-    answer = []
-    self.input_size = arraytools.shape(input)
-
-    # iterate over all the layers
-    for a in range(0, len(input), self.stride):
-
-      layer_output = []
-
-      # iterate over all the elements in the layer
-      for b in range(0, len(input[a]), self.stride):
-        pool = []
-
-        # control the vertical
-        for c in range(self.size):
-
-          # control the horizontal
-          for d in range(self.size):
-
-            if a+c < len(input) and b+d < len(input[a]):
-              pool.append(input[a+c][b+d])
-
-        layer_output.append( max(pool) )
-
-      answer.append(layer_output[:])
-    return answer
-
 class Meanpooling:
   def __init__(self, size, stride, **kwargs):
     """
@@ -1032,51 +882,6 @@ class Meanpooling:
 
     return multichannel_ans
 
-class Meanpooling2D:
-  def __init__(self, size, stride, **kwargs):
-    """
-    Meanpooling
-    -----
-      Scales down any 2D array by pooling, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - size            (int)  : the size of the pooling window
-    - stride          (int)  : the stride of the pooling window
-    - (optional) name (string) : the name of the layer
-    """
-    self.size = size
-    self.stride = stride
-    self.name = kwargs.get('name', 'meanpooling')
-    self.input_size = 0
-
-  def apply(self, input):
-    answer = []
-    self.input_size = arraytools.shape(input)
-
-    # iterate over all the layers
-    for a in range(0, len(input), self.stride):
-
-      layer_output = []
-
-      # iterate over all the elements in the layer
-      for b in range(0, len(input[a]), self.stride):
-        pool = []
-
-        # control the vertical
-        for c in range(self.size):
-
-          # control the horizontal
-          for d in range(self.size):
-
-            if a+c < len(input) and b+d < len(input[a]):
-              pool.append(input[a+c][b+d])
-
-        layer_output.append( sum(pool) / len(pool) )
-
-      answer.append(layer_output[:])
-    return answer
-
 class Flatten:
   def __init__(self, **kwargs):
     """
@@ -1096,28 +901,6 @@ class Flatten:
     
     self.input_shape = arraytools.shape(input)
     
-    return arraytools.flatten(input)
-
-  def set_length(self, length):
-    self.neurons = [0 for _ in range(length)]
-
-class Flatten2D:
-  def __init__(self, **kwargs):
-    """
-    Flatten
-    -----
-      Flattens any 2D array into a 1D array, use this layer before a neural network layer (Dense layer)
-    -----
-    Args
-    -----
-    - (optional) name (string): the name of the layer
-    """
-    self.name = kwargs.get('name', 'flatten')
-    self.neurons = [0]
-    self.input_shape = 0
-
-  def apply(self, input):
-    self.input_shape = arraytools.shape(input)
     return arraytools.flatten(input)
 
   def set_length(self, length):
@@ -1238,72 +1021,6 @@ class Operation:
 
   def get_weighted_sum(self, x):
     return x
-
-class Merge:
-  def __init__(self, merge_type, **kwargs):
-    """
-    Merge
-    -----
-      Merges every branch from the 'Parallel' layer into one, techniques are customizable.
-      this layer will not do anything on any other layer. 
-    -----
-    Args
-    -----
-      merge_type (str) : the type of merge to apply
-    ---
-    Merge types:
-     - 'total'   : pointwise addition of all the return values
-     - 'concat'  : concatenation of all the return values horizontally
-     - 'average' : pointwise average of all the return values
-    """
-    self.name = kwargs.get('name', 'merge')
-    self.merge_type = merge_type
-    self.input_shapes = []
-    self.points = 0
-  
-  def apply(self, input):
-    merge_type = self.merge_type
-    
-    if type(input) == Datacontainer:
-      input = input.data
-      
-      self.input_shapes = []
-      for item in input:
-        
-        self.input_shapes.append(arraytools.shape(item))
-        
-        if len(arraytools.shape(item)) != len(arraytools.shape(input[0])):
-          raise EnvironmentError('All tensors must be the same dimensions, please ensure the parallel layer produce a spatially unifrom output')
-        
-        if arraytools.shape(item) != arraytools.shape(input[0]) and len(arraytools.shape(item)) > 1:
-          raise EnvironmentError('All tensors must be the same shape and size, please ensure the parallel layer produce a spatially unifrom output')
-      
-    else:
-      self.input_shapes = arraytools.shape(input)
-      self.points = len(input)
-      return input
-    
-    final_answer = []
-    
-    if merge_type == 'total':
-      
-      final_answer = arraytools.total(*input)
-      
-    elif merge_type == 'concat':
-      
-      final_answer = arraytools.concat(*input)
-      
-    elif merge_type == 'average':
-      final_answer = arraytools.total(*input)
-      
-      if len(arraytools.shape(final_answer)) == 2:
-        final_answer = [[scaler/len(self.input_shapes) for scaler in row] for row in final_answer]
-        
-      else:
-        final_answer = [scaler/len(self.input_shapes) for scaler in final_answer]
-    
-    self.points = len(final_answer)
-    return final_answer
 
 class Dropout:
   def __init__(self, dropout_rate, **kwargs):

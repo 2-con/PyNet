@@ -1,5 +1,5 @@
 """
-PyNET
+PyNet
 =====
 Created : 18 / April / 2025
 Author  : Aufy Mulyadi

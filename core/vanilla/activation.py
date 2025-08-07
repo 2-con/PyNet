@@ -66,7 +66,7 @@ def ReEU(x, **kwargs):
     return 0
   return min(math.exp(x),max(1,x+1))
 
-def TANDIP(x, **kwargs):
+def ReTanh(x, **kwargs):
   return x * (math.tanh(x+1)+1)/2
 
 # parametric functions

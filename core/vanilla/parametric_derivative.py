@@ -2,7 +2,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from system.defaults import *
 import math
-import core.derivative as Derivative
+import core.vanilla.derivative as Derivative
 
 def ELU_parametric_derivative(x, variable, alpha=ELU_alpha_default, **kwargs):
   if x > 0:

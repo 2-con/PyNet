@@ -1,53 +1,36 @@
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.netcore as net
+import api.alpha as net
 import time
 from tools.arraytools import generate_random_array
+from core.vanilla.activation import ReLU
+from core.vanilla.loss import Mean_squared_error as mse
+from core.vanilla.derivative import ReLU_derivative
+from tools.utility import progress_bar
 
-features = generate_random_array(10,1000)
-targets = generate_random_array(10,1000, min=0, max=100)
+features = generate_random_array(784,100)
+targets = generate_random_array(10,100)
 
-model = net.Sequential(
+model = net.initialize(784, 64, 64, 10)
+
+epochs = 10
+learning_rate = 0.1
+
+for epoch in range(epochs):
+  for data_index in progress_bar(range(len(features)), "> Processing Batch ", f"Epoch {epoch}/{epochs} ({epoch/epochs*100:.2f})%"):
+    feature = features[data_index]
+    target = targets[data_index]
+    activations, weighted_sums = net.propagate(model, feature, ReLU)
+    error = net.backpropegate(model, activations, weighted_sums, target, ReLU_derivative)
+    
+    net.update(model, activations, error, learning_rate)
+
+loss = 0
+
+# evaluation
+for feature, target in zip(features, targets):
+  activations, weighted_sums = net.propagate(model, feature, ReLU)
+  loss += mse(target, activations[-1])
   
-  net.RecurrentBlock(
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-    net.GRU(),
-  ),
-  
-  net.Dense(10, 'leaky relu')
-)
-
-model.compile(
-  optimizer='momentum',
-  loss='mean squared error',
-  learning_rate=0.01,
-  epochs=100,
-  metrics=['mean squared error'],
-  validation_split=0.2,
-  logging=10,
-  verbose=6,
-  optimize=True
-)
-
-start_time = time.perf_counter()
-model.fit(features, targets)
-end_time = time.perf_counter()
-duration = end_time - start_time
-print(f"""
-      finished training in {duration} seconds
-      """)
-
-model.evaluate(
-  features,
-  targets,
-  logging=True
-)
+print(f"Loss: {loss/len(features)}")

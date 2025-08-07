@@ -54,19 +54,19 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools import arraytools, scaler, utility, visual
 from tools import math as math2
 
-from core import activation as Activation
-from core import derivative as Derivative
-from core import loss as Error
-from core import metric as Metrics
-from core import initialization as Initialization
-from core import parametric_derivative as P_Derivative
-from core.utility import *
+from core.vanilla import activation as Activation
+from core.vanilla import derivative as Derivative
+from core.vanilla import loss as Error
+from core.vanilla import metric as Metrics
+from core.vanilla import initialization as Initialization
+from core.vanilla import parametric_derivative as P_Derivative
+from core.vanilla.utility import *
 
 from system.config import *
 from system.defaults import *
 
-from core.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
-import core.optimizer as optimizer
+from core.vanilla.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
+import core.vanilla.optimizer as optimizer
 
 #######################################################################################################
 #                                               Extra                                                 #
@@ -119,7 +119,7 @@ class Key:
     'selu': lambda x: Key._SELU_LAMBDA * np.where(x > 0, x, Key._SELU_ALPHA * (np.exp(x) - 1)), # Corrected
     'reeu': lambda x, alpha=None: np.where(x > 0, x + 1, (alpha if alpha is not None else Key._ELU_ALPHA) * (np.exp(x) - 1) + 1), # Corrected
     'none': lambda x: x, # Linear activation
-    'tandip': lambda x: x * (np.tanh(x + 1) + 1) / 2, # Custom TANDIP
+    'retanh': lambda x: x * (np.tanh(x + 1) + 1) / 2,
 
     # normalization functions
     'binary step': lambda x: np.where(x >= 0, 1, 0),
@@ -142,7 +142,7 @@ class Key:
     'selu': lambda x: Key._SELU_LAMBDA * np.where(x > 0, 1, Key._SELU_ALPHA * np.exp(x)),
     'reeu': lambda x, alpha=None: np.where(x > 0, 1, (alpha if alpha is not None else Key._ELU_ALPHA) * np.exp(x)),
     'none': lambda x: np.ones_like(x), # Derivative of x is 1
-    'tandip': lambda x: (np.tanh(x + 1) + 1) / 2 + x / 2 * (1 - np.tanh(x + 1)**2),
+    'retanh': lambda x: (np.tanh(x + 1) + 1) / 2 + x / 2 * (1 - np.tanh(x + 1)**2),
 
     # normalization functions
     'binary step': lambda x: 1 - np.tanh(x)**2, # use the tanh derivative for binary step to allow learning
@@ -297,7 +297,7 @@ class Key:
     'gelu': Activation.GELU,
     'reeu': Activation.ReEU,
     'none': Activation.Linear,
-    'tandip': Activation.TANDIP,
+    'retanh': Activation.ReTanh,
 
     # normalization functions
     'binary step': Activation.Binary_step,
@@ -324,7 +324,7 @@ class Key:
     'selu': Derivative.SELU_derivative,
     'reeu': Derivative.ReEU_derivative,
     'none': Derivative.Linear_derivative,
-    'tandip': Derivative.TANDIP_derivative,
+    'retanh': Derivative.ReTanh_derivative,
 
     # normalization functions
     'binary step': Derivative.Binary_step_derivative,
@@ -354,7 +354,7 @@ class Key:
     'gelu': do_nothing,
     'reeu': do_nothing,
     'none': do_nothing,
-    'tandip': do_nothing,
+    'retanh': do_nothing,
 
     # normalization functions
     'binary step': do_nothing,
@@ -768,7 +768,10 @@ class Sequential:
       return activations, weighted_sums
 
     def Backpropagate(activations, weighted_sums, target):
-
+      # to anyone reading this:
+      # I am sorry for the mess you are about to see.
+      # brace yourself for the shipwreck of a lifetime.
+      
       def index_corrector(index):
         if index < 0:
           return None

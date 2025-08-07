@@ -6,7 +6,7 @@
 
 PyNet is an Artificial Intelligence and Machine Learning framework entirely built from Python.
 
-Unlike Tensorflow or PyTorch, PyNet is intended for small-scale educational and experimental purposes, its meant to lower the barrier of entry for people intrested in machine learning and Artificial Intelligence using an easy-to-learn language while still implimenting key concepts. But because everything is entirely built on Python, training can be quite slow depending on the machine and therefore, is not advised to serve as a general-purpose library; Other, more proffesionally developed libraries may suite the task at hand.
+Unlike Tensorflow or PyTorch, PyNet is intended for small-scale educational and experimental purposes, its meant to lower the barrier of entry for people intrested in machine learning and Artificial Intelligence using an easy-to-learn language while still implimenting key concepts. 
 
 # Contents
 
@@ -14,7 +14,9 @@ At its core, PyNet is a Library full of layers, activation functions, models and
 
 ## NetCore API
 
-The main API for PyNet, guarenteed to continue receiving constant updates and fixes. It is the most up-to-date standard within this framework.
+The main and first API built for the PyNet framework, everthing is built entirely on python with object-oriented programming as the main programming paradigm for each layer. But because everything is entirely built on Python, training can be quite slow depending on the machine and therefore, is not advised to serve as a general-purpose library; Other, more proffesionally developed libraries may suite the task at hand. 
+
+Experimentation on this API is not reccomended since the backpropagation mechanism is currently under renovation. 
 
 **NetCore Features:**
   - Multichannel Convolution
@@ -33,7 +35,8 @@ The main API for PyNet, guarenteed to continue receiving constant updates and fi
 
 ## NetFlash API
 
-An experimental API meant to optimize NetCore to allow for greater utility. it is currently under development.
+The second API of PyNet, this time built around the JAX ecosystem, leveraging parralelized JNP operations and JIT-compiled systems to boost calculations up to 5x the speed thanks to JAX's XLA compiler.
+
 
 ## PyNet Alpha
 
