@@ -12,6 +12,8 @@ from core.flash.activation import Sigmoid
 
 _EPSILON = 1e-8 # Ensure this matches your original definition
 
+
+
 def Standard_Scaler_Derivative(std):
   return jnp.where(std != 0, 1.0 / (std + epsilon_default), 0.0)
 

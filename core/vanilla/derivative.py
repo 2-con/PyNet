@@ -3,19 +3,49 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from system.defaults import *
 import math
 import core.vanilla.activation as Activation
+from tools.math import sgn
+
+# loss functions
+
+def Mean_squared_error_derivative(predicted:list, target:list):
+  return [((pred - true)) / len(target) for pred, true in zip(predicted, target)]
+
+def Hinge_loss_derivative(predicted:list, target:list):
+  return [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
+
+def Binary_crossentropy_derivative(predicted:list, target:list):
+  return [-1 / pred if true == 1 else 1 / (1 - pred) if pred < 1 else 1000 for true, pred in zip(target, predicted)]
+
+def Sparse_categorical_crossentropy_derivative(predicted:list, target:list):
+  return [-(true == i) / pred if pred != 0 else -1000 for i, pred, true in zip(range(len(predicted)), predicted, target)]
+
+def Categorical_crossentropy_derivative(predicted:list, target:list):
+  return [-true / pred if pred != 0 else -1000 for true, pred in zip(target, predicted)]
+
+def Total_absolute_error_derivative(predicted:list, target:list):
+  return [sgn(pred - true) for pred, true in zip(predicted, target)]
+
+def Mean_absolute_error_derivative(predicted:list, target:list):
+  return [sgn(pred - true) / len(target) for pred, true in zip(predicted, target)]
+
+def Total_squared_error_derivative(predicted:list, target:list):
+  return [(pred - true) for pred, true in zip(predicted, target)]
+
+def L1_loss_derivative(predicted:list, target:list):
+  return [sgn(pred - true) for pred, true in zip(predicted, target)]
 
 # scalers
 
-def Standard_scaler_derivative(x, std):
+def Standard_scaler_derivative(x, std, **kwargs):
   return 1 / std if std != 0 else 0
 
-def Min_max_scaler_derivative(x, min, max):
+def Min_max_scaler_derivative(x, min, max, **kwargs):
   return 1 / (max - min) if max != min else 0
 
-def Max_abs_scaler_derivative(x, max):
+def Max_abs_scaler_derivative(x, max, **kwargs):
   return 1 / max if max != 0 else 0
 
-def Robust_scaler_derivative(x, q1, q3):
+def Robust_scaler_derivative(x, q1, q3, **kwargs):
   return 1 / (q3 - q1) if q3 != q1 else 0
 
 # normalization functions

@@ -5,6 +5,7 @@ Utility
   of the APIs, or are in some way critical in how the APIs work. Functions with a more spesific field of application
   are stored in their respective modules.
 """
+import sys, os
 
 def split(data, second_size):
   """
@@ -40,3 +41,15 @@ def do_nothing(*args, **kwargs) -> 0:
     0
   """
   return 0
+
+def debug(*args, **kwargs):
+  frame = sys._getframe(1)
+  
+  file_name = os.path.basename(frame.f_code.co_filename)
+  line_number = frame.f_lineno
+  function_name = frame.f_code.co_name
+  
+  print("-----------------------")
+  print("  ", f"[{file_name}:{function_name}:{line_number}]")
+  print("  ", *args, **kwargs)
+  print("-----------------------")

@@ -47,7 +47,7 @@ def Total_absolute_error(y_true:list, y_pred:list):
 
   return answer
 
-def l1_loss(ytrue:list, ypred:list):
+def L1_loss(ytrue:list, ypred:list):
   if len(ytrue) != len(ypred):
     raise Exception("y_true and y_pred must have the same length")
 

@@ -16,18 +16,15 @@ At its core, PyNet is a Library full of layers, activation functions, models and
 
 The main and first API built for the PyNet framework, everthing is built entirely on python with object-oriented programming as the main programming paradigm for each layer. But because everything is entirely built on Python, training can be quite slow depending on the machine and therefore, is not advised to serve as a general-purpose library; Other, more proffesionally developed libraries may suite the task at hand. 
 
-Experimentation on this API is not reccomended since the backpropagation mechanism is currently under renovation. 
-
 **NetCore Features:**
   - Multichannel Convolution
   - Dense
   - Localunit (Locally Connected Neurons)
-  - AFS (Adaptive Feature Scaler) - Experimental layer
   - Maxpooling
   - Meanpooling
   - Flatten
   - Reshape
-  - Operation (normalization and activation functions)
+  - Operation (Normalization and Activation functions)
   - RecurrentBlock
   - RNN
   - LSTM
@@ -35,8 +32,11 @@ Experimentation on this API is not reccomended since the backpropagation mechani
 
 ## NetFlash API
 
-The second API of PyNet, this time built around the JAX ecosystem, leveraging parralelized JNP operations and JIT-compiled systems to boost calculations up to 5x the speed thanks to JAX's XLA compiler.
+The second API of PyNet, this time built around the JAX ecosystem, leveraging parralelized JNP operations and JIT-compiled systems to boost calculations up to 5x the speed thanks to the XLA compiler. Everything is designed to be modular, so a custom layer can be passed into the sequential class as long as it adheres to NetFlash spesifications. More information on the documentation.
 
+**Default NetFlash Features:**
+  - Dense
+  - Flatten
 
 ## PyNet Alpha
 
@@ -58,7 +58,7 @@ The first implimentation of PyNet, a module containing functions for propagating
 - Exponential Regression
 - Power Regression
 - Logarithmic Regression
-- Sinusoidal Regression (external model, does not follow PyNet API)
+- Sinusoidal Regression (external model, does not use the PyNet framework)
 
 **Classifiers**
 - K-Nearest Neighbors

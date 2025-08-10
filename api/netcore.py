@@ -379,7 +379,7 @@ class Key:
     'softmax': Derivative.Softmax_derivative,
   }
 
-  ERROR = {
+  LOSS = {
     # continuous error
     'mean squared error': Error.Mean_squared_error,
     'mean abseloute error': Error.Mean_absolute_error,
@@ -391,9 +391,24 @@ class Key:
     'sparse categorical crossentropy': Error.Sparse_categorical_crossentropy,
     'binary crossentropy': Error.Binary_crossentropy,
     'hinge loss': Error.Hinge_loss,
-    'l1 loss': Error.l1_loss,
+    'l1 loss': Error.L1_loss,
   }
 
+  LOSS_DERIVATIVE = {
+    # continuous error
+    'mean squared error': Derivative.Mean_squared_error_derivative,
+    'mean abseloute error': Derivative.Mean_absolute_error_derivative,
+    'total squared error': Derivative.Total_squared_error_derivative,
+    'total abseloute error': Derivative.Total_absolute_error_derivative,
+
+    # categorical error
+    'categorical crossentropy': Derivative.Categorical_crossentropy_derivative,
+    'sparse categorical crossentropy': Derivative.Sparse_categorical_crossentropy_derivative,
+    'binary crossentropy': Derivative.Binary_crossentropy_derivative,
+    'hinge loss': Derivative.Hinge_loss_derivative,
+    'l1 loss': Derivative.L1_loss_derivative,
+  }
+  
   OPTIMIZER = {
     'adam': optimizer.Adam,
     'rmsprop': optimizer.RMSprop,
@@ -781,9 +796,10 @@ class Sequential:
           return index
 
       LSTM_incoming_input = []
-      
       errors = [0] * ( len(self.layers) )
       initial_gradient = []
+      
+      # RNN correction
       
       if self.RNN or self.GRU:
         # predicted = [cell[1] for cell in activations[1:]]
@@ -811,263 +827,198 @@ class Sequential:
       else:
         predicted = activations[-1]
       
-      if True: # calculate the initial gradient
+      # calculate the initial gradient
 
-        if self.loss == 'total squared error':
-          initial_gradient = [
-            (pred - true) 
-            for pred, true in zip(predicted, target)
-            ]
+      initial_gradient = Key.LOSS_DERIVATIVE[self.loss](predicted, target)
+      output_layer_errors = []
 
-        elif self.loss == 'mean abseloute error':
-          initial_gradient = [
-            math2.sgn(pred - true) / len(target) 
-            for pred, true in zip(predicted, target)
-            ]
+      if type(self.layers[-1]) == Operation:
 
-        elif self.loss == 'total abseloute error':
-          initial_gradient = [
-            math2.sgn(pred - true) 
-            for pred, true in zip(predicted, target)
-            ]
-
-        elif self.loss == 'categorical crossentropy':
-
-          initial_gradient = [
-            -true / pred if pred != 0 else -1000 
-            for true, pred in zip(target, predicted)
-            ]
-
-        elif self.loss == 'sparse categorical crossentropy':
-
-          initial_gradient = [
-            -(true == i) / pred if pred != 0 else -1000 
-            for i, pred, true in zip(range(len(predicted)), predicted, target)
-            ]
-
-        elif self.loss == 'binary crossentropy':
-
-          initial_gradient = [
-            -1 / pred if true == 1 and pred != 0 else 1 / (1 - pred) if pred < 1 and pred != 0 else 1000
-            for true, pred in zip(target, predicted)
-          ]
-
-        elif self.loss == 'hinge loss':
-          initial_gradient = [-true if 1-true*pred > 0 else 0 for true, pred in zip(target, predicted)]
-
-        else: # defaults to MSE if loss is ambiguous
-          initial_gradient = [(1 * (pred - true)) / len(target) for pred, true in zip(predicted, target)]
-
-        output_layer_errors = []
-
-        if type(self.layers[-1]) == Operation:
-
-          this_WS = weighted_sums[-1]
-          this_activations = activations[-1]
-          this_layer = self.layers[-1]
-          derivative_list = []
-
-          if self.layers[-1].operation == 'min max scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
-
-            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-          elif self.layers[-1].operation == 'standard scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
-
-            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-          elif self.layers[-1].operation == 'max abs scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
-
-            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-          elif self.layers[-1].operation == 'robust scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
-
-            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-          elif self.layers[-1].operation == 'softmax':
-            derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
-
-            sqrt_size = int(len(derivative_list)**0.5)
-            derivative_list = arraytools.reshape(derivative_list, (sqrt_size, sqrt_size))
-
-            num_outputs = len(initial_gradient)
-            num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
-
-            for j in range(num_inputs): # Iterate through the columns of the Jacobian (inputs of softmax)
-              result = 0
-              for i in range(num_outputs): # Iterate through the rows of the Jacobian (outputs of softmax) and elements of initial_gradient
-                result += initial_gradient[i] * derivative_list[i][j]
-              output_layer_errors.append(result)
-
-          else: # if its a regular operation
-
-            derivative_list = [Key.ACTIVATION_DERIVATIVE[this_layer.operation](a) for a in this_WS]
-
-            output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
-
-        elif type(self.layers[-1]) in (Dense, Localunit): # if its not an operation layer
-
-          output_layer_errors = [
-              error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted, alpha=neuron['alpha'], beta=neuron['beta'])
-              for error, weighted, neuron in zip(initial_gradient, weighted_sums[-1], self.layers[-1].neurons)
-          ]
-
-        elif type(self.layers[-1]) == Flatten: # if its a flatten layer
-          
-          sizex, sizey, sizez = self.layers[-1].input_shape
-
-          output_layer_errors = arraytools.reshape(initial_gradient[:], (sizex, sizey, sizez))
-
-        elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
-          recurrent_output_errors = initial_gradient[:]
-          
-          error_C = initial_gradient[-1]
-          error_D = 0
-          total_error = error_C + error_D
-          
-          derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1], alpha=self.layers[-1].alpha, beta=self.layers[-1].beta)
-          
-          error_Wa = derivative * total_error * activations[-1][0]
-          error_Wb = derivative * total_error * activations[-1][1]
-          error_B  = derivative * total_error
-          error_a  = derivative * total_error * self.layers[-1].carry_weight
-          
-          output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
+        this_WS = weighted_sums[-1]
+        this_activations = activations[-1]
+        this_layer = self.layers[-1]
+        derivative_list = []
         
-        elif type(self.layers[-1]) == LSTM: # if its a LSTM layer
-          this_layer = self.layers[-1]
-          
-          L_error   = 0
-          S_error   = 0
-          out_error = initial_gradient[-1]
-          
-          incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
-          incoming_input = LSTM_incoming_input[-1]
-          
-          ST_weights = self.layers[-1].short_term_weights
-          extra_weights = self.layers[-1].extra_weights
-          input_weights = self.layers[-1].input_weights
-          
-          total_error = out_error + S_error
-          
-          # calculate OUT
-          
-          out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
-          out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
-          out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
-          
-          A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
-          B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
-          
-          # calculate OUT
-          
-          merged_D = 1 * A 
-          short_D = incoming_ST * A
-          input_D = incoming_input * A
-          
-          # calculate INPUT GATE
-          
-          B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
-          C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
-          
-          merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) *  B_gate_error
-          merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
-          
-          input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
-          short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
-          
-          input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
-          short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
-          
-          # calculate FORGET GATE
-          
-          merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
-          short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
-          input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
-          
-          # calculate CARRY
-          
-          carry_ST = (ST_weights[0] * A) + \
-                     (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
-                     (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
-                     (ST_weights[3] * A)
-          
-          carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
-          
-          output_layer_errors = [carry_LT, carry_ST, 
-                                 [merged_A, merged_B, merged_C, merged_D], 
-                                 [short_A, short_B, short_C, short_D], 
-                                 [input_A, input_B, input_C, input_D], 
-                                 [out_a, out_b, out_we]
-                                ]
-          
-        elif type(self.layers[-1]) == GRU: # if its a GRU layer
-          this_layer = self.layers[-1]
-          carry_error = 0
-          out_error = initial_gradient[-1]
-          
-          input_weights = this_layer.input_weights
-          carry_weights = this_layer.carry_weights
-          
-          total_error = out_error + carry_error
-          final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[-1]
-          
-          # output gate
-          
-          error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
-          
-          bias_C  = 1                                                             * error_C
-          input_C = incoming_input                                                * error_C
-          carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
-          
-          # update gate
-          
-          error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
-                    
-          bias_B  = 1              * error_B
-          input_B = incoming_input * error_B
-          carry_B = incoming_carry * error_B
-          
-          # reset gate
-          
-          error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+        if self.layers[-1].operation in ('min max scaler', 'standard scaler', 'max abs scaler', 'robust scaler'):
+          derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum, std=this_layer.std, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
 
-          bias_A  = 1              * error_A
-          input_A = incoming_input * error_A
-          carry_A = incoming_carry * error_A
-          
-          # calculate upstream gradient
-          
-          carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
-                        ( carry_weights[1] * error_B                                                                                                                                                          ) + \
-                        ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
-                        ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
-          
-          output_layer_errors = [
-                                  carry_error, 
-                                 [bias_A, bias_B, bias_C], 
-                                 [carry_A, carry_B, carry_C], 
-                                 [input_A, input_B, input_C]
-                                ]
+        elif self.layers[-1].operation == 'softmax':
+          derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
+
+          sqrt_size = int(len(derivative_list)**0.5)
+          derivative_list = arraytools.reshape(derivative_list, (sqrt_size, sqrt_size))
+
+          num_outputs = len(initial_gradient)
+          num_inputs = len(derivative_list[0]) # Assuming derivative_list is already reshaped
+
+          for j in range(num_inputs): # Iterate through the columns of the Jacobian (inputs of softmax)
+            result = 0
+            for i in range(num_outputs): # Iterate through the rows of the Jacobian (outputs of softmax) and elements of initial_gradient
+              result += initial_gradient[i] * derivative_list[i][j]
+            output_layer_errors.append(result)
+
+        else: # if its a regular operation
+
+          derivative_list = [Key.ACTIVATION_DERIVATIVE[this_layer.operation](a) for a in this_WS]
+
+          output_layer_errors = [error * derivative for error, derivative in zip(initial_gradient, derivative_list)]
+
+      elif type(self.layers[-1]) in (Dense, Localunit): # if its not an operation layer
+
+        output_layer_errors = [
+            error * Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted, alpha=neuron['alpha'], beta=neuron['beta'])
+            for error, weighted, neuron in zip(initial_gradient, weighted_sums[-1], self.layers[-1].neurons)
+        ]
+
+      elif type(self.layers[-1]) == Flatten: # if its a flatten layer
         
-        elif type(self.layers[-1]) == RecurrentBlock:
-          raise NotImplementedError("WIP")
-          # work in progress #########################################
-          
-        else:
-          raise NotImplementedError(f"Layer {self.layers[-1].__class__.__name__} as the last layer is not supported.")
+        sizex, sizey, sizez = self.layers[-1].input_shape
+
+        output_layer_errors = arraytools.reshape(initial_gradient[:], (sizex, sizey, sizez))
+
+      elif type(self.layers[-1]) == Recurrent: # if its a recurrent layer
+        recurrent_output_errors = initial_gradient[:]
+        
+        error_C = initial_gradient[-1]
+        error_D = 0
+        total_error = error_C + error_D
+        
+        derivative = Key.ACTIVATION_DERIVATIVE[self.layers[-1].activation](weighted_sums[-1], alpha=self.layers[-1].alpha, beta=self.layers[-1].beta)
+        
+        error_Wa = derivative * total_error * activations[-1][0]
+        error_Wb = derivative * total_error * activations[-1][1]
+        error_B  = derivative * total_error
+        error_a  = derivative * total_error * self.layers[-1].carry_weight
+        
+        output_layer_errors = [error_Wa, error_Wb, error_B, error_a]
+      
+      elif type(self.layers[-1]) == LSTM: # if its a LSTM layer
+        this_layer = self.layers[-1]
+        
+        L_error   = 0
+        S_error   = 0
+        out_error = initial_gradient[-1]
+        
+        incoming_ST, incoming_LT, final_long_term, final_short_term, merged_state, gated_long_term, weighted_input, weighted_short_term = weighted_sums[-1]
+        incoming_input = LSTM_incoming_input[-1]
+        
+        ST_weights = self.layers[-1].short_term_weights
+        extra_weights = self.layers[-1].extra_weights
+        input_weights = self.layers[-1].input_weights
+        
+        total_error = out_error + S_error
+        
+        # calculate OUT
+        
+        out_we = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)  * extra_weights[0] * extra_weights[1] * total_error # calculate [we]
+        out_a  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[1] * total_error * extra_weights[2]  # calculate [a]
+        out_b  = Key.ACTIVATION["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term) * extra_weights[0] * total_error * extra_weights[2]  # calculate [b]
+        
+        A = Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[3]) * Key.ACTIVATION["tanh"](final_long_term)            * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error
+        B = Key.ACTIVATION["sigmoid"](merged_state[3])            * Key.ACTIVATION_DERIVATIVE["tanh"](final_long_term) * extra_weights[0] * extra_weights[1] * extra_weights[2] * total_error + L_error
+        
+        # calculate OUT
+        
+        merged_D = 1 * A 
+        short_D = incoming_ST * A
+        input_D = incoming_input * A
+        
+        # calculate INPUT GATE
+        
+        B_gate_error = B * Key.ACTIVATION["tanh"](merged_state[2])
+        C_gate_error = B * Key.ACTIVATION["sigmoid"](merged_state[1])
+        
+        merged_B = 1 * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) *  B_gate_error
+        merged_C = 1 * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error
+        
+        input_B = incoming_input * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+        short_B = incoming_ST    * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error
+        
+        input_C = incoming_input * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+        short_C = incoming_ST    * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * C_gate_error
+        
+        # calculate FORGET GATE
+        
+        merged_A = 1              * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+        short_A  = incoming_ST    * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+        input_A  = incoming_input * incoming_LT * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0]) * B
+        
+        # calculate CARRY
+        
+        carry_ST = (ST_weights[0] * A) + \
+                    (ST_weights[1] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1]) * B_gate_error) + \
+                    (ST_weights[2] * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2])    * C_gate_error) + \
+                    (ST_weights[3] * A)
+        
+        carry_LT = B * Key.ACTIVATION["sigmoid"](merged_state[0])
+        
+        output_layer_errors = [carry_LT, carry_ST, 
+                                [merged_A, merged_B, merged_C, merged_D], 
+                                [short_A, short_B, short_C, short_D], 
+                                [input_A, input_B, input_C, input_D], 
+                                [out_a, out_b, out_we]
+                              ]
+        
+      elif type(self.layers[-1]) == GRU: # if its a GRU layer
+        this_layer = self.layers[-1]
+        carry_error = 0
+        out_error = initial_gradient[-1]
+        
+        input_weights = this_layer.input_weights
+        carry_weights = this_layer.carry_weights
+        
+        total_error = out_error + carry_error
+        final_output, gated_carry, merged_state, weighted_input, weighted_carry, incoming_input, incoming_carry = weighted_sums[-1]
+        
+        # output gate
+        
+        error_C = Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * ( 1 - Key.ACTIVATION["sigmoid"](merged_state[1]) ) * total_error
+        
+        bias_C  = 1                                                             * error_C
+        input_C = incoming_input                                                * error_C
+        carry_C = (Key.ACTIVATION["sigmoid"](merged_state[0]) * incoming_carry) * error_C
+        
+        # update gate
+        
+        error_B = total_error * (incoming_carry - Key.ACTIVATION["tanh"](merged_state[2])) * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[1])
+                  
+        bias_B  = 1              * error_B
+        input_B = incoming_input * error_B
+        carry_B = incoming_carry * error_B
+        
+        # reset gate
+        
+        error_A = total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * incoming_carry * carry_weights[2] * Key.ACTIVATION_DERIVATIVE["sigmoid"](merged_state[0])
+
+        bias_A  = 1              * error_A
+        input_A = incoming_input * error_A
+        carry_A = incoming_carry * error_A
+        
+        # calculate upstream gradient
+        
+        carry_error = ( carry_weights[0] * error_A                                                                                                                                                          ) + \
+                      ( carry_weights[1] * error_B                                                                                                                                                          ) + \
+                      ( total_error * (1 - Key.ACTIVATION["sigmoid"](merged_state[1])) * Key.ACTIVATION_DERIVATIVE["tanh"](merged_state[2]) * Key.ACTIVATION["sigmoid"](merged_state[0]) * carry_weights[2] ) + \
+                      ( total_error * Key.ACTIVATION["sigmoid"](merged_state[1])                                                                                                                            ) 
+        
+        output_layer_errors = [
+                                carry_error, 
+                                [bias_A, bias_B, bias_C], 
+                                [carry_A, carry_B, carry_C], 
+                                [input_A, input_B, input_C]
+                              ]
+      
+      elif type(self.layers[-1]) == RecurrentBlock:
+        raise NotImplementedError("WIP")
+        # work in progress #########################################
         
       errors[-1] = output_layer_errors
 
       for this_layer_index in reversed(range(len(self.layers)-1)):
         # - FRONT | next layer --> this layer --> previous layer | BACK +
-
-        this_layer = self.layers[this_layer_index]
-        next_layer = self.layers[this_layer_index - 1] if this_layer_index > 0 else None
         
+        this_layer = self.layers[this_layer_index]
         this_activations = activations[this_layer_index]
         this_WS = weighted_sums[this_layer_index]
 
@@ -1326,17 +1277,8 @@ class Sequential:
         ######################################################################################
         elif type(this_layer) == Operation:
 
-          if this_layer.operation == 'min max scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum) for a in this_WS]
-
-          elif this_layer.operation == 'standard scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, std=this_layer.std) for a in this_WS]
-
-          elif this_layer.operation == 'max abs scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, max=this_layer.maximum) for a in this_WS]
-
-          elif this_layer.operation == 'robust scaler':
-            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
+          if this_layer.operation in ('min max scaler', 'standard scaler', 'max abs scaler', 'robust scaler'):
+            derivative_list = [Key.SCALER_DERIVATIVE[this_layer.operation](a, min=this_layer.minimum, max=this_layer.maximum, std=this_layer.std, q1=this_layer.q1, q3=this_layer.q3) for a in this_WS]
 
           elif this_layer.operation == 'softmax':
             derivative_list = Key.SCALER_DERIVATIVE[this_layer.operation](this_activations)
@@ -1997,7 +1939,7 @@ class Sequential:
           else:
             predicted = activations[-1]
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], predicted)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], predicted)
         
         ########################## update
         
@@ -2037,7 +1979,7 @@ class Sequential:
         if self.validation in Key.ERROR:
           for true, pred in zip(validation_targets, predicted_values):
           
-            validation_loss += Key.ERROR[self.loss](true, pred)
+            validation_loss += Key.LOSS[self.loss](true, pred)
           
           validation_loss /= len(validation_features)
           
@@ -2135,7 +2077,7 @@ class Sequential:
       if metric in Key.METRICS:
         results.append( Key.METRICS[metric](predicted, targets) )
       else:
-        results.append( [Key.ERROR[metric](target, predict) for target, predict in zip(targets, predicted)] )
+        results.append( [Key.LOSS[metric](target, predict) for target, predict in zip(targets, predicted)] )
     
     if logging:
       print("Evaluation Summary:")

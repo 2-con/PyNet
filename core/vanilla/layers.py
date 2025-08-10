@@ -11,40 +11,69 @@ from system.config import *
 from core.vanilla import activation as Activation
 from core.vanilla import initialization as Initialization
 from core.vanilla.datafield import Datacontainer as dc
+from core.vanilla import derivative as Derivative
+from core.vanilla import parametric_derivative as P_Derivative
+from core.vanilla.utility import do_nothing
 
 class Key:
 
-  ACTIVATION = {
+  ACTIVATION_DERIVATIVE = {
     # rectifiers
-    'relu': Activation.ReLU,
-    'softplus': Activation.Softplus,
-    'mish': Activation.Mish,
-    'swish': Activation.Swish,
-    'leaky relu': Activation.Leaky_ReLU,
-    'gelu': Activation.GELU,
-    'reeu': Activation.ReEU,
-    'none': Activation.Linear,
-    'retanh': Activation.ReTanh,
+    'relu': Derivative.ReLU_derivative,
+    'softplus': Derivative.Softplus_derivative,
+    'mish': Derivative.Mish_derivative,
+    'swish': Derivative.Swish_derivative,
+    'leaky relu': Derivative.Leaky_ReLU_derivative,
+    'elu': Derivative.ELU_derivative,
+    'gelu': Derivative.GELU_derivative,
+    'selu': Derivative.SELU_derivative,
+    'reeu': Derivative.ReEU_derivative,
+    'none': Derivative.Linear_derivative,
+    'retanh': Derivative.ReTanh_derivative,
 
     # normalization functions
-    'binary step': Activation.Binary_step,
-    'softsign': Activation.Softsign,
-    'sigmoid': Activation.Sigmoid,
-    'tanh': Activation.Tanh,
+    'binary step': Derivative.Binary_step_derivative,
+    'softsign': Derivative.Softsign_derivative,
+    'sigmoid': Derivative.Sigmoid_derivative,
+    'tanh': Derivative.Tanh_derivative,
     
     # parametric functions
-    'elu': Activation.ELU,
-    'selu': Activation.SELU,
-    'prelu': Activation.PReLU,
-    'silu': Activation.SiLU
+    'elu': Derivative.ELU_derivative,
+    'selu': Derivative.SELU_derivative,
+    'prelu': Derivative.PReLU_derivative,
+    'silu': Derivative.SiLU_derivative
   }
 
-  SCALER = {
-    'standard scaler': scaler.standard_scaler,
-    'min max scaler': scaler.min_max_scaler,
-    'max abs scaler': scaler.max_abs_scaler,
-    'robust scaler': scaler.robust_scaler,
-    'softmax': scaler.softmax,
+  PARAMETRIC_DERIVATIVE = {
+    'elu': P_Derivative.ELU_parametric_derivative,
+    'selu': P_Derivative.SELU_parametric_derivative,
+    'prelu': P_Derivative.PReLU_parametric_derivative,
+    'silu': P_Derivative.SiLU_parametric_derivative,
+    
+    # extra stuff so the whole API dosnt crash
+    'relu': do_nothing,
+    'softplus': do_nothing,
+    'mish': do_nothing,
+    'swish': do_nothing,
+    'leaky relu': do_nothing,
+    'gelu': do_nothing,
+    'reeu': do_nothing,
+    'none': do_nothing,
+    'retanh': do_nothing,
+
+    # normalization functions
+    'binary step': do_nothing,
+    'softsign': do_nothing,
+    'sigmoid': do_nothing,
+    'tanh': do_nothing,
+  }
+
+  SCALER_DERIVATIVE = {
+    'standard scaler': Derivative.Standard_scaler_derivative,
+    'min max scaler': Derivative.Min_max_scaler_derivative,
+    'max abs scaler': Derivative.Max_abs_scaler_derivative,
+    'robust scaler': Derivative.Robust_scaler_derivative,
+    'softmax': Derivative.Softmax_derivative,
   }
 
   INITIALIZATION = {
@@ -212,120 +241,6 @@ class Convolution:
       
     return multichannel_ans
 
-class Convolution2D:
-  def __init__(self, kernel, activation, **kwargs):
-    """
-    Convolution
-    -----
-      Convolution layer with valid padding, accepts and returns 2D arrays.
-    -----
-    Args
-    -----
-    - kernel                (width, height) : the kernel to apply, automatically generated
-    - activation            (string)        : the activation function
-    - (Optional) bias       (bool)          : weither to use bias, defaults to True
-    - (Optional) learnable  (boolean)       : whether or not the kernel is learnable, defaults to True
-    - (Optional) weights    (2D array)      : the kernel to apply, in case the kernel is not learnable
-    - (Optional) name       (string)        : the name of the layer
-    -----
-    Activation functions
-    - ReLU
-    - Softplus
-    - Mish
-    - Swish
-    - Leaky ReLU
-    - GELU
-    - ReEU
-    - None
-    - TANDIP
-
-    Normalization functions
-    - Binary Step
-    - Softsign
-    - Sigmoid
-    - Tanh
-    
-    Parametric functions
-    - ELU
-    - SELU
-    - PReLU
-    - SiLU
-    
-    Parametric functions
-    - ELU
-    - SELU
-    - PReLU
-    - SiLU
-    """
-    self.kernel = arraytools.generate_random_array(kernel[0], kernel[1])
-    self.alpha = parametric_alpha_default
-    self.beta = parametric_beta_default
-    self.activation = activation.lower()
-    self.learnable = kwargs.get('learnable', True)
-    self.use_bias = kwargs.get('bias', True)
-    self.bias = kwargs.get('bias_value', 0)
-    self.name = kwargs.get('name', 'convolution')
-    self.weights = kwargs.get('weights', self.kernel)
-    self.input_shape = 0
-    self.kernel = self.weights
-
-  def apply(self, input):
-    self.input_shape = arraytools.shape(input)
-    answer = []
-    
-    m_rows = len(input)
-    m_cols = len(input[0])
-    k_rows = len(self.kernel)
-    k_cols = len(self.kernel[0])
-    
-    # Calculate the dimensions of the output matrix
-    output_rows = (m_rows - k_rows) + 1
-    output_cols = (m_cols - k_cols) + 1
-    
-    # Initialize the output matrix with zeros
-    output = [[0] * output_cols for _ in range(output_rows)]
-    
-    # Perform convolution
-    for i in range(output_rows):
-      for j in range(output_cols):
-        dot_product = 0
-      
-        for ki in range(k_rows):
-          for kj in range(k_cols):
-            dot_product += input[i + ki][j + kj] * self.kernel[ki][kj]
-    
-        output[i][j] = Key.ACTIVATION[self.activation](dot_product, alpha=self.alpha, beta=self.beta) + self.bias 
-    
-    return output
-
-  def get_weighted_sum(self, input):
-    answer = []
-    
-    m_rows = len(input)
-    m_cols = len(input[0])
-    k_rows = len(self.kernel)
-    k_cols = len(self.kernel[0])
-    
-    # Calculate the dimensions of the output matrix
-    output_rows = (m_rows - k_rows) + 1
-    output_cols = (m_cols - k_cols) + 1
-    
-    # Initialize the output matrix with zeros
-    output = [[0] * output_cols for _ in range(output_rows)]
-    
-    # Perform convolution
-    for i in range(output_rows):
-      for j in range(output_cols):
-        dot_product = 0
-      
-        for ki in range(k_rows):
-          for kj in range(k_cols):
-            dot_product += input[i + ki][j + kj] * self.kernel[ki][kj]
-    
-        output[i][j] = dot_product + self.bias 
-    
-    return output
-
 class Dense:
   def __init__(self, neurons, activation, **kwargs):
     """
@@ -449,7 +364,7 @@ class Dense:
     for _neuron in self.neurons
     ]
     return answer
-
+  
 class Localunit:
   def __init__(self, receptive_field, activation, **kwargs):
     """

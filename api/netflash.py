@@ -51,10 +51,12 @@ from system.config import *
 #                                               Extra                                                 #
 #######################################################################################################
 
-""" TODO:
+""" Notes:
 
+jax.grad and jax.value_and_grad dosn't work for some reason, it keeps breaking for no reason at all.
+chatgpt says its a new bug and that i should be reported. whatever the cause, those are off the table.
 
-
+yes, i've tried to fix it for hours and it still doesn't work.
 """
 
 #######################################################################################################
@@ -233,7 +235,7 @@ class Sequential:
 
     self.layers.append(layer)
 
-  def compile(self, input_shape, optimizer, loss, learning_rate, epochs, metrics:list, batch_size=1, verbose=1, logging=1, **kwargs):
+  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list, batch_size=1, verbose=1, logging=1, **kwargs):
     """
     Compile
     -----
@@ -242,7 +244,14 @@ class Sequential:
     -----
     Args
     -----
-    - N/A
+    - input_shape   (tuple[int, ...]) : shape of the input data, include channels for image data and features for tabular data.
+    - loss          (str)             : loss function to use
+    - learning_rate (float)           : learning rate to use
+    - epochs        (int)             : number of epochs to train for
+    - metrics       (list)            : metrics to use
+    - batch_size    (int)             : batch size to use
+    - verbose       (int)             : verbosity level
+    - logging       (int)             : logging level
 
     """
     self.input_shape = input_shape
@@ -260,8 +269,12 @@ class Sequential:
     sizes = []
     
     # set sizes while ignoring fans
-    for layer in self.layers:
-      _, layer_size = layer.calibrate(input_shape,1) if type(layer) in (Dense, '') else layer.calibrate(input_shape,1)
+    for layer_index, layer in enumerate(self.layers):
+      if layer_index == 0:
+        _, layer_size = layer.calibrate(input_shape,1) if type(layer) in (Dense, '') else layer.calibrate(input_shape,(1,))
+      else:
+        _, layer_size = layer.calibrate(sizes[layer_index-1],1) if type(layer) in (Dense, '') else layer.calibrate(sizes[layer_index-1],(1,))
+      
       sizes.append(layer_size)
     
     for layer_index, layer in enumerate(self.layers):
@@ -397,12 +410,13 @@ class Sequential:
       for layer_index in reversed(range(len(self.layers))):
         layer = self.layers[layer_index]
         
-        if type(layer) in (Flatten,):
-          continue
         
         layer_params = parameters_pytree.get(f'layer_{layer_index}', {})
         
         error, gradients = layer.backward(layer_params, activations[layer_index], error, weighted_sums[layer_index])
+        
+        if type(layer) in (Flatten,):
+          continue
         
         layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
           learning_rate,
