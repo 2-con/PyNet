@@ -174,6 +174,8 @@ class Dense:
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     
+    # print(params['weights'], inputs)
+    
     weighted_sums = params['weights'] @ inputs + params['biases']
     activated_output = self.activation_fn(weighted_sums)
     
@@ -218,7 +220,9 @@ class Flatten:
     # since all inputs are transposed, the input to this layer will be goofy if its composed of 2d images.
     # input format: (batch, channels, height, width)
     
-    flattened_output = inputs.reshape(inputs.shape[2], -1)
+    
+    flattened_output = inputs.reshape(inputs.shape[0], -1)
+    
     
     # For a Flatten layer, we return the original inputs for the backward pass
     return flattened_output.T, inputs 
@@ -238,7 +242,7 @@ class Convolution:
     self.activation_function = Key.ACTIVATION[activation]
     self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation]
 
-    self.params = {}
+    self.params = {} # only used for initialization
     self.input_shape = None # Will be set during calibration
     self.output_shape = None # Will be set during calibration
     
@@ -346,3 +350,139 @@ class Convolution:
 
     return upstream_gradient, param_gradients
 
+class MaxPooling:
+  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), **kwargs):
+    self.pool_size = pool_size
+    self.strides = strides
+
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
+    # input shape = (C, H, W)
+    C, H, W = fan_in_shape
+    
+    # Calculate the output dimensions after pooling
+    pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
+    pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
+    
+    self.input_shape = fan_in_shape
+    
+    return {}, (C, pooled_H, pooled_W)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # input format: (batch, channels, height, width)
+    
+    if len(inputs.T.shape) != 4:
+      inputs = jnp.expand_dims(inputs.T, axis=1)
+    
+    # The forward pass uses reduce_window to get the maximum value in each pooling window.
+    pooled_output = jax.lax.reduce_window(
+      inputs,
+      init_value=-jnp.inf,
+      computation=jax.lax.max,
+      window_dimensions=(1, 1, *self.pool_size),
+      window_strides=(1, 1, *self.strides),
+      padding='VALID'
+    )
+
+    # activations and WS
+    return pooled_output, inputs
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    N, C, H, W = inputs.shape
+    _, _, pooled_H, pooled_W = error.shape
+    
+    @jax.jit
+    def unpool_single_channel(input_slice, error_slice):
+      input_window_shape = (H // self.strides[0], self.strides[0], W // self.strides[1], self.strides[1])
+      input_reshaped = input_slice.reshape(input_window_shape)
+      
+      # rearrange dimensions to group windows
+      input_windows = jnp.transpose(input_reshaped, (0, 2, 1, 3))
+      input_windows = input_windows.reshape(-1, self.pool_size[0] * self.pool_size[1])
+
+      # argmax to find max values for each window
+      max_indices = jnp.argmax(input_windows, axis=1)
+
+      # one-hot the indices
+      one_hot_mask = jax.nn.one_hot(max_indices, self.pool_size[0] * self.pool_size[1])
+
+      # reshape the gradients to match the encoded mask
+      error_reshaped = error_slice.flatten()
+      unpooled_gradient_flattened = one_hot_mask * jnp.expand_dims(error_reshaped, axis=1)
+      
+      # reshape unpooled gradient back to the original shape
+      unpooled_gradient_reshaped = unpooled_gradient_flattened.reshape(H // self.strides[0], W // self.strides[1], self.strides[0], self.strides[1])
+      unpooled_gradient_reshaped = jnp.transpose(unpooled_gradient_reshaped, (0, 2, 1, 3))
+
+      return unpooled_gradient_reshaped.reshape(H, W)
+
+    # Vectorize the operation over the batch and channels
+    unpool_over_batch = jax.vmap(unpool_single_channel, in_axes=(0, 0))
+    upstream_gradient = jax.vmap(unpool_over_batch, in_axes=(1, 1))(inputs, error)
+
+    # vmap outputs (C, N, H, W) -> (N, C, H, W)
+    upstream_gradient = jnp.transpose(upstream_gradient, (1, 0, 2, 3))
+
+    return upstream_gradient, {}
+
+class MeanPooling:
+  def __init__(self, pool_size: tuple[int, int] = (2, 2), strides: tuple[int, int] = (2, 2), **kwargs):
+    self.pool_size = pool_size
+    self.strides = strides
+
+  def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape: tuple[int, int]) -> tuple[dict, tuple[int, ...]]:
+    # input shape = (C, H, W)
+    C, H, W = fan_in_shape
+    
+    # Calculate the output dimensions after pooling
+    pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
+    pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
+    
+    self.input_shape = fan_in_shape
+    
+    return {}, (C, pooled_H, pooled_W)
+
+  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # The apply method now performs a mean reduction instead of a max reduction.
+    # It's computationally the same but uses a different primitive.
+    
+    if len(inputs.T.shape) != 4:
+      inputs = jnp.expand_dims(inputs.T, axis=1)
+
+    # The forward pass uses reduce_window to get the average value in each pooling window.
+    pooled_output = jax.lax.reduce_window(
+      inputs,
+      init_value=0.,
+      computation=jax.lax.add,
+      window_dimensions=(1, 1, *self.pool_size),
+      window_strides=(1, 1, *self.strides),
+      padding='VALID'
+    )
+    
+    # average the results
+    pool_area = self.pool_size[0] * self.pool_size[1]
+    pooled_output /= pool_area
+
+    # activation and WS
+    return pooled_output, inputs
+
+  def backward(self, params: dict, inputs: jnp.ndarray, error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    N, C, H, W = inputs.shape
+    _, _, pooled_H, pooled_W = error.shape
+    pool_area = self.pool_size[0] * self.pool_size[1]
+
+    @jax.jit
+    def distribute_gradient(error_value):
+      return jnp.full(self.pool_size, error_value / pool_area)
+
+    distribute_spatial_gradients = jax.vmap(distribute_gradient)
+    
+    # reshapehe error tensor to (N * C, H_out * W_out)
+    error_reshaped = error.reshape(N * C, pooled_H, pooled_W)
+
+    # apply the function to the error.
+    distributed_gradients = jax.vmap(distribute_spatial_gradients)(error_reshaped) # shape (N * C, H_out, W_out, H_k, W_k).
+    
+    final_shape = (N, C, H, W) # The new shape is (N, C, H, W).
+    upstream_gradient = distributed_gradients.reshape(final_shape)
+
+    return upstream_gradient, {}

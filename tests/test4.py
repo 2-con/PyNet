@@ -12,6 +12,7 @@ import time
 # Example Usage
 model = Sequential(
   Convolution((2,2), 2, 'identity', (1,1)),
+  MeanPooling((2,2), (1,1)),
   Flatten(),
   Dense(2, 'leaky relu'),
 )

@@ -382,7 +382,7 @@ class Sequential:
     #                                        Functions                                          #
     #############################################################################################
 
-    # @jit
+    @jit
     def propagate(features:jnp.ndarray, parameters:dict) -> tuple[jnp.ndarray, jnp.ndarray]:
       
       activations   = [features]
@@ -410,12 +410,11 @@ class Sequential:
       for layer_index in reversed(range(len(self.layers))):
         layer = self.layers[layer_index]
         
-        
         layer_params = parameters_pytree.get(f'layer_{layer_index}', {})
         
         error, gradients = layer.backward(layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
-        if type(layer) in (Flatten,):
+        if type(layer) in (Flatten, MaxPooling, MeanPooling):
           continue
         
         layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
