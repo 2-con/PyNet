@@ -1,6 +1,7 @@
 <p align="center">
-  <img width="658" height="165" alt="image" src="https://github.com/user-attachments/assets/0dcf4931-a993-42a9-9c94-96e9afb6d0e3" />
+  <img width="1593" height="235" alt="Screenshot 2025-08-14 211202" src="https://github.com/user-attachments/assets/7df3f78c-4edb-4099-8081-5b052c0f9a75" />
 </p>
+
 
 # PyNet Version 1.0.0
 
