@@ -174,16 +174,12 @@ class Dense:
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     
-    # print(params['weights'], inputs)
-    
     weighted_sums = params['weights'] @ inputs + params['biases']
     activated_output = self.activation_fn(weighted_sums)
     
     return activated_output, weighted_sums 
   
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    
-    
     # grads_z will have shape: (output_features, batch_size)
     grads_z = self.activation_derivative_fn(error, weighted_sums) # dE/dz
 
@@ -201,38 +197,6 @@ class Dense:
     }
 
     return upstream_gradient, param_grads
-
-class Flatten:
-  def __init__(self, **kwargs):
-    pass
-
-  def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
-    flattened_size = 1
-    for dim in fan_in_shape:
-      flattened_size *= dim
-        
-    self.input_shape = fan_in_shape
-    
-    # Flatten layer has no parameters
-    return {}, (int(flattened_size),)
-
-  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # since all inputs are transposed, the input to this layer will be goofy if its composed of 2d images.
-    # input format: (batch, channels, height, width)
-    
-    
-    flattened_output = inputs.reshape(inputs.shape[0], -1)
-    
-    
-    # For a Flatten layer, we return the original inputs for the backward pass
-    return flattened_output.T, inputs 
-
-  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    #(self, params: dict, inputs_original_shape: jnp.ndarray, error: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-
-    upstream_gradient = error.T.reshape(inputs.shape)
-
-    return upstream_gradient, {}
 
 class Convolution:
   def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int] = (1, 1), **kwargs):
@@ -349,6 +313,117 @@ class Convolution:
     }
 
     return upstream_gradient, param_gradients
+
+class Localunit:
+  def __init__(self, receptive_field:int, activation:str, stride:int = 1, padding:str = 'VALID', **kwargs):
+    self.receptive_field = receptive_field
+    self.stride = stride
+    self.padding = padding
+    
+    self.activation_name = activation.lower()
+    if self.activation_name not in Key.ACTIVATION:
+      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
+    
+    self.activation_fn = Key.ACTIVATION[self.activation_name]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[self.activation_name]
+
+    self.initializer_fn = Key.INITIALIZER['default']
+    if self.activation_name in rectifiers:
+      self.initializer_fn = Key.INITIALIZER['he normal']
+    elif self.activation_name in normalization:
+      self.initializer_fn = Key.INITIALIZER['glorot normal']
+
+    if 'initializer' in kwargs:
+      if kwargs['initializer'].lower() not in Key.INITIALIZER:
+        raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+    L_in = fan_in_shape[0]
+    
+    if self.padding.upper() == 'VALID':
+        L_out = (L_in - self.receptive_field) // self.stride + 1
+    else: # assuming 'SAME'
+        L_out = (L_in + self.stride - 1) // self.stride
+
+    # The weight shape is now (L_out, L_k), as there's no channel dimension.
+    weights_shape = (L_out, self.receptive_field)
+    self.output_shape = (L_out,)
+    self.input_shape = fan_in_shape
+    
+    # fan_in is the size of the receptive field.
+    weights = self.initializer_fn(weights_shape, self.receptive_field, 1)
+    biases = jnp.zeros((L_out, 1))
+
+    return {'weights': weights, 'biases': biases}, self.output_shape
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # inputs are (N, L_in)
+    weights = params['weights']
+    N, L_in = inputs.shape
+    L_out, L_k = weights.shape
+    
+    # Unfold the input tensor to get all receptive field patches.
+    unfolded_inputs = jnp.lib.stride_tricks.as_strided(
+      inputs,
+      shape=(N, L_out, L_k),
+      strides=(inputs.strides[0], self.stride * inputs.strides[1], inputs.strides[1])
+    )
+    
+    # Perform the local matrix multiplication for weighted sums.
+    weighted_sums = jnp.einsum('nLk, Lk->nL', unfolded_inputs, weights) + params['biases'].T
+    activated_output = self.activation_fn(weighted_sums)
+
+    return activated_output, weighted_sums
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    weights = params['weights']
+    N, L_in = inputs.shape
+    L_out, L_k = weights.shape
+
+    grads_z = self.activation_derivative_fn(error, weighted_sums)
+
+    unfolded_inputs = jnp.lib.stride_tricks.as_strided(
+      inputs,
+      shape=(N, L_out, L_k),
+      strides=(inputs.strides[0], self.stride * inputs.strides[1], inputs.strides[1])
+    )
+    
+    # Calculate gradients for weights and biases.
+    grads_weights = jnp.einsum('nL, nLk->Lk', grads_z, unfolded_inputs)
+    grads_biases = jnp.sum(grads_z, axis=0, keepdims=True).T
+
+    # Calculate the upstream gradient.
+    upstream_gradient = jnp.lib.stride_tricks.as_strided(
+      jnp.zeros_like(inputs),
+      shape=(N, L_in, L_k),
+      strides=(inputs.strides[0], inputs.strides[1], inputs.strides[1])
+    )
+    
+    # Perform a manual transposed convolution-like operation with the error and flipped weights.
+    flipped_weights = jnp.flip(weights, axis=1)
+    for i in range(L_out):
+      upstream_gradient = upstream_gradient.at[:, i * self.stride:i * self.stride + L_k, :].set(
+        upstream_gradient[:, i * self.stride:i * self.stride + L_k, :] + grads_z[:, i:i+1].T * flipped_weights[i:i+1, :]
+      )
+    
+    upstream_gradient = jnp.sum(upstream_gradient, axis=2)
+
+    param_grads = {
+      'weights': grads_weights,
+      'biases': grads_biases
+    }
+    
+    return upstream_gradient, param_grads
+
+
+
+
+
+
+# functional layers
+
+
 
 class MaxPooling:
   def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), **kwargs):
@@ -486,3 +561,34 @@ class MeanPooling:
     upstream_gradient = distributed_gradients.reshape(final_shape)
 
     return upstream_gradient, {}
+
+class Flatten:
+  def __init__(self, **kwargs):
+    pass
+
+  def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
+    flattened_size = 1
+    for dim in fan_in_shape:
+      flattened_size *= dim
+        
+    self.input_shape = fan_in_shape
+    
+    # Flatten layer has no parameters
+    return {}, (int(flattened_size),)
+
+  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # since all inputs are transposed, the input to this layer will be goofy if its composed of 2d images.
+    # input format: (batch, channels, height, width)
+    
+    flattened_output = inputs.reshape(inputs.shape[0], -1)
+    
+    # For a Flatten layer, we return the original inputs for the backward pass
+    return flattened_output.T, inputs 
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    #(self, params: dict, inputs_original_shape: jnp.ndarray, error: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+
+    upstream_gradient = error.T.reshape(inputs.shape)
+
+    return upstream_gradient, {}
+

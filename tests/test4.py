@@ -11,15 +11,12 @@ import time
 
 # Example Usage
 model = Sequential(
-  Convolution((2,2), 2, 'identity', (1,1)),
-  MeanPooling((2,2), (1,1)),
-  Flatten(),
-  Dense(2, 'leaky relu'),
+  Localunit(2, 'relu')
 )
 
 # Compile the model
 model.compile(
-  input_shape=(1,3,3),
+  input_shape=(2,),
   optimizer='default',
   loss='mean squared error',
   learning_rate=0.001,
@@ -32,18 +29,18 @@ model.compile(
 
 # Generate some dummy data for training
 features = jnp.array([
-  # [1,1],
-  # [2,2],
+  [1,1,1],
+  [2,2,2],
   # [3,3],
   # [4,4]
   
-[[1,2,3],
- [4,5,6],
- [7,8,9]],
+# [[1,2,3],
+#  [4,5,6],
+#  [7,8,9]],
 
-[[10,11,12],
- [13,14,15],
- [16,17,18]],
+# [[10,11,12],
+#  [13,14,15],
+#  [16,17,18]],
 ], dtype=jnp.float32)
 
 targets = jnp.array([
