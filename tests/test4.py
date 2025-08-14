@@ -16,7 +16,7 @@ model = Sequential(
 
 # Compile the model
 model.compile(
-  input_shape=(2,),
+  input_shape=(3,),
   optimizer='default',
   loss='mean squared error',
   learning_rate=0.001,

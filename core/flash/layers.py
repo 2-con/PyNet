@@ -342,9 +342,9 @@ class Localunit:
     L_in = fan_in_shape[0]
     
     if self.padding.upper() == 'VALID':
-        L_out = (L_in - self.receptive_field) // self.stride + 1
+      L_out = (L_in - self.receptive_field) // self.stride + 1
     else: # assuming 'SAME'
-        L_out = (L_in + self.stride - 1) // self.stride
+      L_out = (L_in + self.stride - 1) // self.stride
 
     # The weight shape is now (L_out, L_k), as there's no channel dimension.
     weights_shape = (L_out, self.receptive_field)
@@ -358,63 +358,88 @@ class Localunit:
     return {'weights': weights, 'biases': biases}, self.output_shape
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # inputs are (N, L_in)
+    
+    raise NotImplementedError("error with the implimentation. apply the actual convolution-like thing here.")
+    
     weights = params['weights']
+    biases = params['biases']
     N, L_in = inputs.shape
     L_out, L_k = weights.shape
-    
-    # Unfold the input tensor to get all receptive field patches.
-    unfolded_inputs = jnp.lib.stride_tricks.as_strided(
-      inputs,
-      shape=(N, L_out, L_k),
-      strides=(inputs.strides[0], self.stride * inputs.strides[1], inputs.strides[1])
-    )
-    
-    # Perform the local matrix multiplication for weighted sums.
-    weighted_sums = jnp.einsum('nLk, Lk->nL', unfolded_inputs, weights) + params['biases'].T
-    activated_output = self.activation_fn(weighted_sums)
 
+    weighted_sums = jnp.zeros((N, L_out))
+
+    for n in range(N):
+        for l_out in range(L_out):
+            start_index = l_out * self.stride
+            input_patch = inputs[n, start_index:start_index + L_k]
+            
+            local_weights = weights[l_out]
+            local_bias = biases[l_out]
+            
+            # The issue is here: this is an array of shape (1,)
+            # We fix it by taking the first element of the bias array
+            weighted_sum = jnp.sum(input_patch * local_weights) + local_bias[0] 
+            
+            # Now, weighted_sum is a scalar, which can be assigned to a scalar location
+            weighted_sums = weighted_sums.at[n, l_out].set(weighted_sum)
+    
+    activated_output = self.activation_fn(weighted_sums)
     return activated_output, weighted_sums
+
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     weights = params['weights']
+    biases = params['biases']
     N, L_in = inputs.shape
     L_out, L_k = weights.shape
 
     grads_z = self.activation_derivative_fn(error, weighted_sums)
 
-    unfolded_inputs = jnp.lib.stride_tricks.as_strided(
-      inputs,
-      shape=(N, L_out, L_k),
-      strides=(inputs.strides[0], self.stride * inputs.strides[1], inputs.strides[1])
-    )
-    
-    # Calculate gradients for weights and biases.
-    grads_weights = jnp.einsum('nL, nLk->Lk', grads_z, unfolded_inputs)
-    grads_biases = jnp.sum(grads_z, axis=0, keepdims=True).T
+    grads_weights = jnp.zeros_like(weights)
+    grads_biases = jnp.zeros_like(biases)
+    upstream_gradient = jnp.zeros_like(inputs)
 
-    # Calculate the upstream gradient.
-    upstream_gradient = jnp.lib.stride_tricks.as_strided(
-      jnp.zeros_like(inputs),
-      shape=(N, L_in, L_k),
-      strides=(inputs.strides[0], inputs.strides[1], inputs.strides[1])
-    )
-    
-    # Perform a manual transposed convolution-like operation with the error and flipped weights.
-    flipped_weights = jnp.flip(weights, axis=1)
-    for i in range(L_out):
-      upstream_gradient = upstream_gradient.at[:, i * self.stride:i * self.stride + L_k, :].set(
-        upstream_gradient[:, i * self.stride:i * self.stride + L_k, :] + grads_z[:, i:i+1].T * flipped_weights[i:i+1, :]
-      )
-    
-    upstream_gradient = jnp.sum(upstream_gradient, axis=2)
+    # Calculate gradients for weights, biases, and the upstream gradient
+    for n in range(N):
+      for l_out in range(L_out):
+        start_index = l_out * self.stride
+        input_patch = inputs[n, start_index:start_index + L_k]
+        
+        d_loss_d_z = grads_z[n, l_out]
+
+        # Calculate weight and bias gradients for this location
+        d_loss_d_weights = input_patch * d_loss_d_z
+        grads_weights = grads_weights.at[l_out].add(d_loss_d_weights)
+        
+        d_loss_d_bias = d_loss_d_z
+        grads_biases = grads_biases.at[l_out].add(d_loss_d_bias)
+
+        # Calculate upstream gradient for this location's receptive field
+        local_weights = weights[l_out]
+        d_loss_d_input = local_weights * d_loss_d_z
+        
+        upstream_gradient = upstream_gradient.at[n, start_index:start_index + L_k].add(d_loss_d_input)
 
     param_grads = {
       'weights': grads_weights,
       'biases': grads_biases
     }
-    
+
     return upstream_gradient, param_grads
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
