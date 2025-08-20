@@ -11,15 +11,15 @@ import time
 
 # Example Usage
 model = Sequential(
-  Localunit(2, 'relu')
+  Recurrent(3, 'tanh', output_sequence=(0,2))
 )
 
 # Compile the model
 model.compile(
-  input_shape=(3,),
+  input_shape=(3,3),
   optimizer='default',
   loss='mean squared error',
-  learning_rate=0.001,
+  learning_rate=0.01,
   epochs=1000,
   metrics=['accuracy'], 
   batch_size=2,
@@ -27,25 +27,31 @@ model.compile(
   logging=100
 )
 
-# Generate some dummy data for training
+# some dummy data for training
 features = jnp.array([
-  [1,1,1],
-  [2,2,2],
-  # [3,3],
-  # [4,4]
+  # [1,1,1],
+  # [2,2,2],
+  # [1,1],
+  # [2,2]
   
-# [[1,2,3],
-#  [4,5,6],
-#  [7,8,9]],
+[[1,2,3],
+ [4,5,6],
+ [7,8,9]],
 
-# [[10,11,12],
-#  [13,14,15],
-#  [16,17,18]],
+[[10,11,12],
+ [13,14,15],
+ [16,17,18]],
 ], dtype=jnp.float32)
 
-targets = jnp.array([
-  [1,1],
-  [2,2],
+targets = jnp.array([ 
+  # [2,2],
+  # [4,4],
+  
+[[1,2,3],
+ [4,5,6]],
+
+[[7 ,8 ,9 ],
+ [10,11,12]],
 ])
 
 # Fit the model

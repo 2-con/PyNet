@@ -58,7 +58,7 @@ def image_display(input:list, **kwargs) -> None:
 
 def array_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10, **kwargs) -> None:
   """
-  Numerical Display
+  Array Display
   -----
     Displays any n-dimensional array nicely
   -----
@@ -159,6 +159,39 @@ def array_display(data, pad:int = 2, start_indent:int = 0, decimals:int = 10, **
       array_display(data[i], pad, start_indent=start_indent + pad, decimals=decimals, maxnum=maxnum, padding=padding, depth=depth + 1)
       
     print(indent + ']')
+
+def dictionary_display(data: dict, pad: int = 2):
+  """
+  Dictionary Display
+  -----
+    Displays any dictionary nicely
+  -----
+  Args
+  -----
+  - data (dict) : the dictionary to be shown
+  - (optional) pad (int) : the number of spaces to indent the dictionary
+  """
+  print('{') if pad == 2 else None
+  
+  for key, value in data.items():
+    print(' ' * pad, end='')
+    print(f"'{key}': ", end='')
+    
+    if type(value) == dict:
+      print('{')
+      dictionary_display(value, pad + 2)
+      print(' ' * pad + '}')
+      
+    elif type(value) in (list, tuple):
+      array_display(value, start_indent=pad + 2)
+      
+    else:
+      print(repr(value), end='')
+      
+    print()
+    
+  if pad == 2:
+    print('}')
 
 def tree_display(start_node, pad:int = 2) -> None:
   """

@@ -137,6 +137,8 @@ returns:
 
 """
 
+from tools.visual import dictionary_display as display
+
 class Dense:
   def __init__(self, neurons: int, activation, **kwargs):
     self.neuron_amount = neurons
@@ -314,23 +316,22 @@ class Convolution:
 
     return upstream_gradient, param_gradients
 
-class Localunit:
-  def __init__(self, receptive_field:int, activation:str, stride:int = 1, padding:str = 'VALID', **kwargs):
-    self.receptive_field = receptive_field
-    self.stride = stride
-    self.padding = padding
+class Recurrent:
+  def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, **kwargs):
+    self.cells = cells
     
-    self.activation_name = activation.lower()
-    if self.activation_name not in Key.ACTIVATION:
+    
+    
+    if activation not in Key.ACTIVATION:
       raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
     
-    self.activation_fn = Key.ACTIVATION[self.activation_name]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[self.activation_name]
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
 
     self.initializer_fn = Key.INITIALIZER['default']
-    if self.activation_name in rectifiers:
+    if activation in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif self.activation_name in normalization:
+    elif activation in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -338,99 +339,86 @@ class Localunit:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
       self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
-    L_in = fan_in_shape[0]
+    self.input_sequence = input_sequence
+    self.output_sequence = output_sequence
+
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
     
-    if self.padding.upper() == 'VALID':
-      L_out = (L_in - self.receptive_field) // self.stride + 1
-    else: # assuming 'SAME'
-      L_out = (L_in + self.stride - 1) // self.stride
-
-    # The weight shape is now (L_out, L_k), as there's no channel dimension.
-    weights_shape = (L_out, self.receptive_field)
-    self.output_shape = (L_out,)
-    self.input_shape = fan_in_shape
+    # fan_in_shape = (features, sequence_length) -> We assume features is first
+    features = fan_in_shape[0]
+    sequence_length = fan_in_shape[1]
     
-    # fan_in is the size of the receptive field.
-    weights = self.initializer_fn(weights_shape, self.receptive_field, 1)
-    biases = jnp.zeros((L_out, 1))
-
-    return {'weights': weights, 'biases': biases}, self.output_shape
-
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    if self.input_sequence is None:
+      self.input_sequence = tuple(range(features)) 
+    elif max(self.input_sequence) != features - 1:
+      raise ValueError("The highest index in input_sequence must be less than the number of input features.")
     
-    raise NotImplementedError("error with the implimentation. apply the actual convolution-like thing here.")
+    if self.output_sequence is None:
+      self.output_sequence = tuple(range(self.cells))
+    elif max(self.output_sequence) != self.cells - 1:
+      raise ValueError("The highest index in output_sequence must be less than the number of cells.") 
     
-    weights = params['weights']
-    biases = params['biases']
-    N, L_in = inputs.shape
-    L_out, L_k = weights.shape
-
-    weighted_sums = jnp.zeros((N, L_out))
-
-    for n in range(N):
-        for l_out in range(L_out):
-            start_index = l_out * self.stride
-            input_patch = inputs[n, start_index:start_index + L_k]
-            
-            local_weights = weights[l_out]
-            local_bias = biases[l_out]
-            
-            # The issue is here: this is an array of shape (1,)
-            # We fix it by taking the first element of the bias array
-            weighted_sum = jnp.sum(input_patch * local_weights) + local_bias[0] 
-            
-            # Now, weighted_sum is a scalar, which can be assigned to a scalar location
-            weighted_sums = weighted_sums.at[n, l_out].set(weighted_sum)
+    params = {}
     
-    activated_output = self.activation_fn(weighted_sums)
-    return activated_output, weighted_sums
+    for cell_index in range(self.cells):
+      params[f'cell_{cell_index}'] = {
+        'input_weights': self.initializer_fn((sequence_length), features, fan_out_shape[0]),
+        'carry_weights': self.initializer_fn((sequence_length), features, fan_out_shape[0]),
+        'bias': jnp.zeros(sequence_length)
+      }
+    
+    return params, self.output_sequence
+    
+  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    
+    batches, sequence_length, features = inputs.T.shape
+    inputs = inputs.T
+    
+    # Prepare arrays to store results
+    per_batch_output = []
+    per_batch_WS = []
 
-
-  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    weights = params['weights']
-    biases = params['biases']
-    N, L_in = inputs.shape
-    L_out, L_k = weights.shape
-
-    grads_z = self.activation_derivative_fn(error, weighted_sums)
-
-    grads_weights = jnp.zeros_like(weights)
-    grads_biases = jnp.zeros_like(biases)
-    upstream_gradient = jnp.zeros_like(inputs)
-
-    # Calculate gradients for weights, biases, and the upstream gradient
-    for n in range(N):
-      for l_out in range(L_out):
-        start_index = l_out * self.stride
-        input_patch = inputs[n, start_index:start_index + L_k]
+    # Process each batch sample one by one
+    for n in range(batches):
+      input_carry = jnp.zeros(features)
+      weighted_sums = []
+      outputs = []
+      
+      # Iterate through each cell
+      for cell_index in range(self.cells):
+        input_carry = jnp.zeros(features) if cell_index == 0 else output_carry
+        cell_params = params[f'cell_{cell_index}']
         
-        d_loss_d_z = grads_z[n, l_out]
-
-        # Calculate weight and bias gradients for this location
-        d_loss_d_weights = input_patch * d_loss_d_z
-        grads_weights = grads_weights.at[l_out].add(d_loss_d_weights)
+        input_vector = jnp.zeros(sequence_length)
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          input_vector = inputs[n, input_feature_idx, :]
+          
+        weighted_input = jnp.dot(input_vector, cell_params['input_weights'])
+        weighted_carry = jnp.dot(input_carry , cell_params['carry_weights'])
+        WS = weighted_input + weighted_carry + cell_params['bias']
         
-        d_loss_d_bias = d_loss_d_z
-        grads_biases = grads_biases.at[l_out].add(d_loss_d_bias)
-
-        # Calculate upstream gradient for this location's receptive field
-        local_weights = weights[l_out]
-        d_loss_d_input = local_weights * d_loss_d_z
+        output_carry = self.activation_fn(WS)
+        weighted_sums.append(WS)
         
-        upstream_gradient = upstream_gradient.at[n, start_index:start_index + L_k].add(d_loss_d_input)
-
-    param_grads = {
-      'weights': grads_weights,
-      'biases': grads_biases
-    }
-
-    return upstream_gradient, param_grads
-
-
-
-
-
+        outputs.append(output_carry) if cell_index in self.output_sequence else do_nothing()
+        
+      per_batch_output.append(outputs)
+      per_batch_WS.append(weighted_sums)
+          
+    # print(jnp.array(per_batch_WS))
+    # exit()
+    
+    return jnp.array(per_batch_output).T, jnp.array(per_batch_WS)
+  
+  def backward(self, params: dict, inputs: jnp.ndarray, error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    batches, sequence_length, features = inputs.T.shape
+    
+    
+    print(error)
+    display(params)
+    print(inputs)
+    exit()
 
 
 
@@ -447,8 +435,6 @@ class Localunit:
 
 
 # functional layers
-
-
 
 class MaxPooling:
   def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), **kwargs):

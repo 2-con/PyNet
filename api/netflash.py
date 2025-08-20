@@ -382,7 +382,7 @@ class Sequential:
     #                                        Functions                                          #
     #############################################################################################
 
-    @jit
+    # @jit
     def propagate(features:jnp.ndarray, parameters:dict) -> tuple[jnp.ndarray, jnp.ndarray]:
       
       activations   = [features]
@@ -407,12 +407,12 @@ class Sequential:
       error:jnp.ndarray, parameters_pytree:dict, opt_state:dict, activations:jnp.ndarray, weighted_sums:jnp.ndarray, 
       timestep:int, optimizer_hyperparams:dict, learning_rate) -> tuple[dict, dict]:
       
-      for layer_index in reversed(range(len(self.layers))):
+      for layer_index in reversed(range(len(layers_tuple))):
         layer = self.layers[layer_index]
         
         layer_params = parameters_pytree.get(f'layer_{layer_index}', {})
         
-        error, gradients = layer.backward(layer_params, activations[layer_index], error, weighted_sums[layer_index])
+        error, gradients = backward_func_tuple[layer_index](layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
         if type(layer) in (Flatten, MaxPooling, MeanPooling):
           continue
@@ -456,7 +456,7 @@ class Sequential:
     timestep = 0
     
     update_step = jax.jit(step, static_argnums=(0,1)) # static argnums dosent work for JIT wrappers apparently...
-    backward_func_tuple = tuple(jax.jit(layer.backward) for layer in self.layers)
+    backward_func_tuple = tuple((layer.backward) for layer in self.layers)
     learning_rate = jnp.float32(self.learning_rate)
     
     # test
@@ -473,8 +473,20 @@ class Sequential:
 
       for base_index in utility.progress_bar(range(0, len(features), self.batchsize),"> Processing Batch",f"Epoch {epoch+1}/{self.epochs} ({round( (epoch/(self.epochs))*100 , 2)}%)",decimals=2, length=100, empty=' ') if self.verbose == 2 else range(0, len(features), self.batchsize):
 
-        batch_features = features[base_index : base_index + self.batchsize]
-        batch_targets = targets[base_index : base_index + self.batchsize]
+        key = jax.random.PRNGKey(random.randint(0, 2**32))  # Use a seeded key for reproducibility
+
+        num_samples = features.shape[0]
+
+        # Generate a shuffled array of indices
+        shuffled_indices = jax.random.permutation(key, num_samples)
+
+        # Use the shuffled indices to create a randomized dataset
+        randomized_features = features[shuffled_indices]
+        randomized_targets = targets[shuffled_indices]
+
+        # Now, create your batches from the randomized data
+        batch_features = randomized_features[base_index : self.batchsize]
+        batch_targets = randomized_targets[base_index : self.batchsize]
         
         activations_and_weighted_sums = propagate(batch_features.T, self.params_pytree)
         
@@ -483,7 +495,7 @@ class Sequential:
         initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1].T)
         
         timestep += 1
-        current_params, current_opt_state = update_step(
+        current_params, current_opt_state = step(
           tuple(self.layers),
           backward_func_tuple,
           
