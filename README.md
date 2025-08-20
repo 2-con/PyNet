@@ -37,6 +37,9 @@ The second API of PyNet, this time built around the JAX ecosystem, leveraging pa
 **Default NetFlash Features:**
   - Dense
   - Flatten
+  - Multichannel Convolution
+  - Maxpooling
+  - Meanpooling
 
 ## PyNet Alpha
 
@@ -93,7 +96,7 @@ Dependancies
 - Time
 - Matplotlib
 
-# Liscence
+# Licence
 
 **Apache License 2.0**
 This project is licensed under the MIT License - see [LICENSE](https://github.com/2-con/PyNet/blob/main/LICENSE) for more details.
@@ -109,12 +112,6 @@ Maintainer
 
 Contributors
 - None
-
-# Contact
-
-The email below is an organisation email, external emails might get flagged and/or discarded.
-
-Email: 72212@jisedu.or.id
 
 # Development status
 
