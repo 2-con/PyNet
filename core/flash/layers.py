@@ -140,12 +140,58 @@ returns:
 from tools.visual import dictionary_display as display
 
 class Dense:
-  def __init__(self, neurons: int, activation, **kwargs):
-    self.neuron_amount = neurons
+  def __init__(self, neurons:int, activation, **kwargs):
+    """
+    Dense
+    -----
+      A fully connected layer that connects the previous layer to the next layer. Accepts and returns 1D arrays (excludes batch dimension), so input_shape should be of the form
+      (input_size,), anything after the 1st dimention will be ignored.
+    -----
+    Args
+    -----
+    - neurons     (int)     : the number of neurons in the layer
+    - activation  (string)  : the activation function
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
 
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    self.neuron_amount = neurons
     self.activation_name = activation.lower()
     
-    # in case the user passed some doohickey panini for activation
     if self.activation_name not in Key.ACTIVATION:
       raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
     
@@ -165,33 +211,25 @@ class Dense:
 
     self.input_size = None
 
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
-
+  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int):
     self.input_size = fan_in[0]
-    
-    weights = self.initializer_fn((self.neuron_amount, fan_in[0]), fan_in[0], fan_out_shape)
-    biases = jnp.zeros((self.neuron_amount, 1))
-    
+    weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in[0], fan_out_shape)
+    biases = jnp.zeros((self.neuron_amount,))
     return {'weights': weights, 'biases': biases}, (self.neuron_amount,)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    
-    weighted_sums = params['weights'] @ inputs + params['biases']
+  def apply(self, params:dict, inputs:jnp.ndarray):
+    # inputs: (batch, in_features), weights: (in_features, out_features)
+    weighted_sums = inputs @ params['weights'] + params['biases']
     activated_output = self.activation_fn(weighted_sums)
-    
-    return activated_output, weighted_sums 
-  
-  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    # grads_z will have shape: (output_features, batch_size)
-    grads_z = self.activation_derivative_fn(error, weighted_sums) # dE/dz
+    return activated_output, weighted_sums
 
-    # (output_features, input_features)
-    grads_weights = jnp.einsum('ob,ib->oi', grads_z, inputs)
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray):
+    # error: (batch, out_features), inputs: (batch, in_features)
+    grads_z = self.activation_derivative_fn(error, weighted_sums)
 
-    grads_biases = jnp.sum(grads_z, axis=1, keepdims=True) 
-
-    upstream_gradient = params['weights'].T @ grads_z
-    
+    grads_weights = jnp.einsum("bi,bj->ij", inputs, grads_z)  # (in_features, out_features)
+    grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
+    upstream_gradient = grads_z @ params['weights'].T  # (batch, in_features)
 
     param_grads = {
       'weights': grads_weights,
@@ -201,130 +239,222 @@ class Dense:
     return upstream_gradient, param_grads
 
 class Convolution:
-  def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int] = (1, 1), **kwargs):
+  def __init__(self, kernel: tuple[int, int], channels: int, activation: str, stride: tuple[int, int] = (1, 1), **kwargs):
+    """
+    Convolution
+    -----
+      Convolution that is fixed with a valid padding and no dilation. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
+      (Image Height, Image Width, Channels).
+    -----
+    Args
+    -----
+    - neurons     (int)     : the number of neurons in the layer
+    - activation  (string)  : the activation function
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    
     self.kernel = kernel
     self.channels = channels
     self.stride = stride
-    self.activation_function = Key.ACTIVATION[activation]
-    self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation]
 
-    self.params = {} # only used for initialization
-    self.input_shape = None # Will be set during calibration
-    self.output_shape = None # Will be set during calibration
-    
-    if 'initializer' in kwargs and kwargs['initializer'].lower() not in Key.INITIALIZER:
-      raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}") 
+    if activation.lower() not in Key.ACTIVATION:
+      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
 
-  def calibrate(self, fan_in_shape: tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
-    # The fan_in_shape here is (C_in, H, W).
+    self.activation_function = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation.lower()]
 
-    input_channels = fan_in_shape[0]
+    self.params = {}
+    self.input_shape = None
+    self.output_shape = None
 
-    # kernel shape = (output_channels, input_channels, kernel_height, kernel_width)
-    weight_initializer = (Key.INITIALIZER['he normal'] if self.activation_function in rectifiers else Key.INITIALIZER['glorot normal']) if self.activation_function in normalization + rectifiers else Key.INITIALIZER['default']
-    
-    self.params['weights'] = weight_initializer((self.channels, input_channels, *self.kernel), fan_in_shape[-2] * fan_in_shape[-1], fan_out_shape)
+    if "initializer" in kwargs:
+      if kwargs["initializer"].lower() not in Key.INITIALIZER:
+        raise ValueError(
+          f"Unknown initializer: '{kwargs['initializer'].lower()}'. "
+          f"Available: {list(Key.INITIALIZER.keys())}"
+        )
+      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
+    else:
+      # He for rectifiers, Glorot for normalizers, else default
+      if self.activation_function in rectifiers:
+        self.initializer_fn = Key.INITIALIZER["he normal"]
+      elif self.activation_function in normalization:
+        self.initializer_fn = Key.INITIALIZER["glorot normal"]
+      else:
+        self.initializer_fn = Key.INITIALIZER["default"]
 
-    # bias shape = (output_channels,)
-    self.params['biases'] = jnp.zeros(self.channels)
-    
-    # Calculate the output shape
-    out_H = jnp.floor((fan_in_shape[-2] - self.kernel[0]) / self.stride[0]) + 1
-    out_W = jnp.floor((fan_in_shape[-1] - self.kernel[1]) / self.stride[1]) + 1
+  def calibrate(self, fan_in_shape: tuple[int, int, int], fan_out_shape: int):
+    # fan_in_shape = (C_in, H, W)
+    C_in, H, W = fan_in_shape
+
+    self.params["weights"] = self.initializer_fn(
+      (self.channels, C_in, *self.kernel),
+      C_in * self.kernel[0] * self.kernel[1],
+      fan_out_shape,
+    )
+    self.params["biases"] = jnp.zeros((self.channels,))
+
+    # output dims (VALID padding)
+    out_H = (H - self.kernel[0]) // self.stride[0] + 1
+    out_W = (W - self.kernel[1]) // self.stride[1] + 1
     self.output_shape = (self.channels, out_H, out_W)
-    
+
     return self.params, self.output_shape
 
-  def apply(self, params: dict, inputs: jnp.ndarray) -> jnp.ndarray:
-    
-    # N: Batch size
-    # C: Channels
-    # H: image Height
-    # W: image Width
-    # O: Output channels
-    # I: Input channels
-    
-    if len(inputs.T.shape) != 4:
-      inputs = jnp.expand_dims(inputs.T, axis=1)
-    
-    # input  format NCHW (batch_size, channels, height, width)
-    # kernel format OIHW (output_channels, input_channels, kernel_height, kernel_width)
+  def apply(self, params: dict, inputs: jnp.ndarray):
+    """
+    inputs: (N, C_in, H, W)
+    weights: (C_out, C_in, kH, kW)
+    bias: (C_out,)
+    """
+    if inputs.ndim != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
+
     convolved = jax.lax.conv_general_dilated(
-      lhs=inputs,# LHS = image
-      rhs=params['weights'],# RHS = kernel
+      lhs=inputs,
+      rhs=params["weights"],
       window_strides=self.stride,
-      padding='VALID',
-      dimension_numbers=('NCHW', 'OIHW', 'NCHW') 
-      # input,                            kernel,                                  output
-      # (batch, channels, height, width), (out_channels, channels, height, width), (batch, channels, height, width)
+      padding="VALID",
+      dimension_numbers=("NCHW", "OIHW", "NCHW"),
     )
-    
-    # Add bias to each output channel
-    bias = params['biases'][jnp.newaxis, :, jnp.newaxis, jnp.newaxis]
-    output = convolved + bias
 
-    return self.activation_function(output), output
+    bias = params["biases"][jnp.newaxis, :, jnp.newaxis, jnp.newaxis]
+    WS = convolved + bias
+    activated = self.activation_function(WS)
+    return activated, WS
 
-  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    # both jax.lax.conv_transpose and jax.lax.conv_general_dilated dosn't work for some reason.
-    # so manual implementation is needed.
-    # input  format NCHW (batch_size, channels, height, width)
-    # kernel format OIHW (output_channels, input_channels, kernel_height, kernel_width)
-    
-    # derive the incoming errors (dE/dz)    
-    d_WS = self.activation_derivative(upstream_error, weighted_sums)
-    
-    # derive the bias and sum it up per kernel
-    grad_bias = jnp.sum(d_WS, axis=(0, 2, 3))
+  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray):
+    if inputs.ndim != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
 
-    # add a channel dimension to the input in case its 2d
-    inputs = jnp.expand_dims(inputs.T, axis=1) if len(inputs.T.shape) != 4 else inputs.T
-  
-    # calculate the kernel gradient
-    @jax.jit
-    def correlate_2d_slices(input_slice, error_slice):
-      return jax.scipy.signal.correlate(input_slice, error_slice, mode='valid')
+    d_WS = self.activation_derivative(upstream_error, weighted_sums)  # (N, C_out, H_out, W_out)
 
-    channel_correlations_per_batch = jax.vmap(correlate_2d_slices, in_axes=(1, None))
-    all_correlations = jax.vmap(channel_correlations_per_batch, in_axes=(None, 1))
-    grad_weights = jnp.sum(all_correlations(inputs, d_WS), axis=2)
-    
-    # calculate the upstream gradient
-    N, C_out, H_out, W_out = d_WS.shape
-      
-    # dilate incoming error
-    dilated_H = H_out + (H_out - 1) * (self.stride[0] - 1)
-    dilated_W = W_out + (W_out - 1) * (self.stride[1] - 1)
-    dilated_d_WS = jnp.zeros((N, C_out, dilated_H, dilated_W), dtype=d_WS.dtype)
-    dilated_d_WS = dilated_d_WS.at[:, :, ::self.stride[0], ::self.stride[1]].set(d_WS)
-    
-    @jax.jit
-    def convolve_image(error_slice, kernel_slice):
-      return jax.scipy.signal.convolve(error_slice, kernel_slice, mode='full')
-    
-    # transposed convolve
-    convolve_over_channels = jax.vmap(convolve_image, in_axes=(None, 1))
-    all_convolutions = jax.vmap(convolve_over_channels, in_axes=(0, None))
-    
-    flipped_weights = jnp.flip(params['weights'], axis=(2, 3))
-    upstream_gradient = jnp.sum(all_convolutions(dilated_d_WS, flipped_weights), axis=2)
-    
-    param_gradients = {
-      'weights': grad_weights,
-      'biases': grad_bias
-    }
+    # bias gradients
+    grad_bias = jnp.sum(d_WS, axis=(0, 2, 3))  # (C_out,)
 
+    def correlate(inputs, errors, kernel_shape, strides):
+      N, C_in, H_in, W_in = inputs.shape
+      _, C_out, H_out, W_out = errors.shape
+      kH, kW = kernel_shape
+      sH, sW = strides
+
+      grad_weights = jnp.zeros((C_out, C_in, kH, kW))
+
+      # Loop over the batches
+      for n in range(N):
+        # Loop over the output spatial dimensions
+        for h_out in range(H_out):
+          for w_out in range(W_out):
+            # Calculate the slice for the input patch
+            h_start, w_start = h_out * sH, w_out * sW
+            input_patch = jax.lax.slice(
+              inputs[n],
+              (0, h_start, w_start),
+              (C_in, h_start + kH, w_start + kW)
+            )
+
+            # Get the error for the current output position
+            error_patch = jax.lax.slice(
+              errors[n],
+              (0, h_out, w_out),
+              (C_out, h_out + 1, w_out + 1)
+            ).reshape(C_out, 1, 1, 1)
+
+            # Compute the outer product and add to the gradient
+            # error_patch: (C_out, 1, 1, 1)
+            # input_patch: (C_in, kH, kW)
+            # The result has shape (C_out, C_in, kH, kW)
+            grad_weights += error_patch * jnp.expand_dims(input_patch, axis=0)
+
+      return grad_weights
+
+    def transposed_convolution(errors, weights, stride=(1,1)):
+      N, C_out, H_out, W_out = errors.shape
+      C_out_w, C_in, kH, kW = weights.shape
+      sH, sW = stride
+
+      # Compute input dimensions
+      H_in = (H_out - 1) * sH + kH
+      W_in = (W_out - 1) * sW + kW
+
+      upstream_gradient = jnp.zeros((N, C_in, H_in, W_in))
+
+      # Flip weights on spatial dimensions for transposed convolution
+      flipped_weights = weights[:, :, ::-1, ::-1]  # shape: (C_out, C_in, kH, kW)
+
+      # Loop over batches, output channels, and spatial positions
+      for n in range(N):
+        for co in range(C_out):
+          for i in range(H_out):
+            for j in range(W_out):
+              h_start = i * sH
+              w_start = j * sW
+              # Broadcast the multiplication across input channels
+              upstream_gradient = upstream_gradient.at[n, :, h_start:h_start+kH, w_start:w_start+kW].add(
+                flipped_weights[co] * errors[n, co, i, j]
+              )
+      return upstream_gradient
+
+    # Cross-correlation between input and error
+    grad_weights = correlate(
+      inputs=inputs,
+      errors=d_WS,
+      kernel_shape=self.kernel,
+      strides=self.stride
+    )
+
+    # Conv transpose to propagate error back
+    upstream_gradient = transposed_convolution(
+      errors=d_WS, 
+      weights=params["weights"], 
+      stride=self.stride
+    )
+
+    param_gradients = {"weights": grad_weights, "biases": grad_bias}
     return upstream_gradient, param_gradients
 
 class Recurrent:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, **kwargs):
     self.cells = cells
-    
-    
-    
-    if activation not in Key.ACTIVATION:
-      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
-    
+
+    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+
     self.activation_fn = Key.ACTIVATION[activation.lower()]
     self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
 
@@ -342,83 +472,117 @@ class Recurrent:
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
-    
-    # fan_in_shape = (features, sequence_length) -> We assume features is first
-    features = fan_in_shape[0]
-    sequence_length = fan_in_shape[1]
-    
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]):
+    features, sequence_length = fan_in_shape
     if self.input_sequence is None:
-      self.input_sequence = tuple(range(features)) 
-    elif max(self.input_sequence) != features - 1:
-      raise ValueError("The highest index in input_sequence must be less than the number of input features.")
-    
+      self.input_sequence = tuple([_ for _ in range(features)]) 
     if self.output_sequence is None:
-      self.output_sequence = tuple(range(self.cells))
-    elif max(self.output_sequence) != self.cells - 1:
-      raise ValueError("The highest index in output_sequence must be less than the number of cells.") 
-    
+      self.output_sequence = tuple([_ for _ in range(self.cells)])
+
     params = {}
-    
     for cell_index in range(self.cells):
       params[f'cell_{cell_index}'] = {
-        'input_weights': self.initializer_fn((sequence_length), features, fan_out_shape[0]),
-        'carry_weights': self.initializer_fn((sequence_length), features, fan_out_shape[0]),
+        'input_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        'carry_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
         'bias': jnp.zeros(sequence_length)
       }
-    
     return params, self.output_sequence
-    
-  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    
-    batches, sequence_length, features = inputs.T.shape
-    inputs = inputs.T
-    
-    # Prepare arrays to store results
+
+  def apply(self, params:dict, inputs:jnp.ndarray):
+    # inputs: (batch, seq_len, features)
+    batches, seq_len, features = inputs.shape
     per_batch_output = []
     per_batch_WS = []
 
-    # Process each batch sample one by one
     for n in range(batches):
       input_carry = jnp.zeros(features)
       weighted_sums = []
       outputs = []
-      
-      # Iterate through each cell
+
       for cell_index in range(self.cells):
         input_carry = jnp.zeros(features) if cell_index == 0 else output_carry
         cell_params = params[f'cell_{cell_index}']
+
+        input_vector = jnp.zeros(features)
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          input_vector = inputs[n, input_feature_idx, :]  # take entire sequence
+
+        # print(input_vector)
+        # print(cell_params['input_weights'])
+        # exit()
+
+        weighted_input = jnp.dot(input_vector, cell_params['input_weights'])
         
-        input_vector = jnp.zeros(sequence_length)
+        # print(input_carry)
+        # print(cell_params['carry_weights'])
+        # exit()
+        
+        weighted_carry = jnp.dot(input_carry, cell_params['carry_weights'])
+        WS = weighted_input + weighted_carry + cell_params['bias']
+
+        output_carry = self.activation_fn(WS)
+        weighted_sums.append(WS)
+
+        if cell_index in self.output_sequence:
+          outputs.append(output_carry)
+
+      per_batch_output.append(outputs)
+      per_batch_WS.append(weighted_sums)
+
+    return jnp.array(per_batch_output), jnp.array(per_batch_WS)
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray):
+    batches, seq_len, features = inputs.shape
+    grads = {k: {
+      "input_weights": jnp.zeros_like(v["input_weights"]),
+      "carry_weights": jnp.zeros_like(v["carry_weights"]),
+      "bias": jnp.zeros_like(v["bias"])
+    } for k, v in params.items()}
+
+    input_grads = jnp.zeros_like(inputs)
+
+    for n in range(batches):
+      
+      grad_carry = jnp.zeros(features)
+      for cell_index in reversed(range(self.cells)):
+        
+        cell_params = params[f'cell_{cell_index}']
+        WS = weighted_sums[n, cell_index]
+
+        local_error = error[n, cell_index] + grad_carry
+        
+        # print(local_error)
+        # print(WS)
+        # exit()
+        
+        delta = self.activation_derivative_fn(local_error, WS)
+
         if cell_index in self.input_sequence:
           input_feature_idx = self.input_sequence.index(cell_index)
           input_vector = inputs[n, input_feature_idx, :]
+        else:
+          input_vector = jnp.zeros(seq_len)
+
+        prev_carry = jnp.zeros(features) if cell_index == 0 else weighted_sums[n, cell_index-1]
+
+        # print(delta)
+        # print(prev_carry)
+        # print(params[f'cell_{cell_index}']['carry_weights'])
+        # exit()
+        
+        grads[f'cell_{cell_index}']["input_weights"] += jnp.dot(input_vector, delta)
+        grads[f'cell_{cell_index}']["carry_weights"] += jnp.dot(prev_carry, delta)
+        grads[f'cell_{cell_index}']["bias"] += delta
+
+        if cell_index in self.input_sequence:
           
-        weighted_input = jnp.dot(input_vector, cell_params['input_weights'])
-        weighted_carry = jnp.dot(input_carry , cell_params['carry_weights'])
-        WS = weighted_input + weighted_carry + cell_params['bias']
-        
-        output_carry = self.activation_fn(WS)
-        weighted_sums.append(WS)
-        
-        outputs.append(output_carry) if cell_index in self.output_sequence else do_nothing()
-        
-      per_batch_output.append(outputs)
-      per_batch_WS.append(weighted_sums)
-          
-    # print(jnp.array(per_batch_WS))
-    # exit()
-    
-    return jnp.array(per_batch_output).T, jnp.array(per_batch_WS)
-  
-  def backward(self, params: dict, inputs: jnp.ndarray, error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    batches, sequence_length, features = inputs.T.shape
-    
-    
-    print(error)
-    display(params)
-    print(inputs)
-    exit()
+          input_grads = input_grads.at[n, :, input_feature_idx].add(delta @ cell_params['input_weights'].T)
+
+        grad_carry = delta @ cell_params['carry_weights'].T
+
+    return input_grads, grads
+
 
 
 
@@ -442,24 +606,16 @@ class MaxPooling:
     self.strides = strides
 
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
-    # input shape = (C, H, W)
     C, H, W = fan_in_shape
-    
-    # Calculate the output dimensions after pooling
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
-    
     self.input_shape = fan_in_shape
-    
     return {}, (C, pooled_H, pooled_W)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # input format: (batch, channels, height, width)
-    
     if len(inputs.T.shape) != 4:
       inputs = jnp.expand_dims(inputs.T, axis=1)
-    
-    # The forward pass uses reduce_window to get the maximum value in each pooling window.
+
     pooled_output = jax.lax.reduce_window(
       inputs,
       init_value=-jnp.inf,
@@ -468,46 +624,30 @@ class MaxPooling:
       window_strides=(1, 1, *self.strides),
       padding='VALID'
     )
-
-    # activations and WS
-    return pooled_output, inputs
+    return pooled_output, inputs   # WS is just inputs here
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    # Inputs are already NCHW at this point
     N, C, H, W = inputs.shape
     _, _, pooled_H, pooled_W = error.shape
-    
-    @jax.jit
-    def unpool_single_channel(input_slice, error_slice):
-      input_window_shape = (H // self.strides[0], self.strides[0], W // self.strides[1], self.strides[1])
-      input_reshaped = input_slice.reshape(input_window_shape)
-      
-      # rearrange dimensions to group windows
-      input_windows = jnp.transpose(input_reshaped, (0, 2, 1, 3))
-      input_windows = input_windows.reshape(-1, self.pool_size[0] * self.pool_size[1])
 
-      # argmax to find max values for each window
-      max_indices = jnp.argmax(input_windows, axis=1)
+    pool_H, pool_W = self.pool_size
+    stride_H, stride_W = self.strides
 
-      # one-hot the indices
-      one_hot_mask = jax.nn.one_hot(max_indices, self.pool_size[0] * self.pool_size[1])
+    def grad_single(x, grad_out):
+      """Backprop a single (H,W) map with pooled grads."""
+      grad_in = jnp.zeros_like(x)
+      for i in range(pooled_H):
+        for j in range(pooled_W):
+          h_start, h_end = i * stride_H, i * stride_H + pool_H
+          w_start, w_end = j * stride_W, j * stride_W + pool_W
+          window = x[h_start:h_end, w_start:w_end]
+          mask = window == jnp.max(window)
+          grad_in = grad_in.at[h_start:h_end, w_start:w_end].add(mask * grad_out[i, j])
+      return grad_in
 
-      # reshape the gradients to match the encoded mask
-      error_reshaped = error_slice.flatten()
-      unpooled_gradient_flattened = one_hot_mask * jnp.expand_dims(error_reshaped, axis=1)
-      
-      # reshape unpooled gradient back to the original shape
-      unpooled_gradient_reshaped = unpooled_gradient_flattened.reshape(H // self.strides[0], W // self.strides[1], self.strides[0], self.strides[1])
-      unpooled_gradient_reshaped = jnp.transpose(unpooled_gradient_reshaped, (0, 2, 1, 3))
-
-      return unpooled_gradient_reshaped.reshape(H, W)
-
-    # Vectorize the operation over the batch and channels
-    unpool_over_batch = jax.vmap(unpool_single_channel, in_axes=(0, 0))
-    upstream_gradient = jax.vmap(unpool_over_batch, in_axes=(1, 1))(inputs, error)
-
-    # vmap outputs (C, N, H, W) -> (N, C, H, W)
-    upstream_gradient = jnp.transpose(upstream_gradient, (1, 0, 2, 3))
-
+    grad_fn = jax.vmap(jax.vmap(grad_single, in_axes=(0,0)), in_axes=(0,0))
+    upstream_gradient = grad_fn(inputs, error)
     return upstream_gradient, {}
 
 class MeanPooling:
@@ -516,25 +656,16 @@ class MeanPooling:
     self.strides = strides
 
   def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape: tuple[int, int]) -> tuple[dict, tuple[int, ...]]:
-    # input shape = (C, H, W)
     C, H, W = fan_in_shape
-    
-    # Calculate the output dimensions after pooling
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
-    
     self.input_shape = fan_in_shape
-    
     return {}, (C, pooled_H, pooled_W)
 
   def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # The apply method now performs a mean reduction instead of a max reduction.
-    # It's computationally the same but uses a different primitive.
-    
     if len(inputs.T.shape) != 4:
       inputs = jnp.expand_dims(inputs.T, axis=1)
 
-    # The forward pass uses reduce_window to get the average value in each pooling window.
     pooled_output = jax.lax.reduce_window(
       inputs,
       init_value=0.,
@@ -543,34 +674,28 @@ class MeanPooling:
       window_strides=(1, 1, *self.strides),
       padding='VALID'
     )
-    
-    # average the results
     pool_area = self.pool_size[0] * self.pool_size[1]
     pooled_output /= pool_area
-
-    # activation and WS
     return pooled_output, inputs
 
   def backward(self, params: dict, inputs: jnp.ndarray, error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     N, C, H, W = inputs.shape
     _, _, pooled_H, pooled_W = error.shape
-    pool_area = self.pool_size[0] * self.pool_size[1]
+    pool_H, pool_W = self.pool_size
+    stride_H, stride_W = self.strides
+    pool_area = pool_H * pool_W
 
-    @jax.jit
-    def distribute_gradient(error_value):
-      return jnp.full(self.pool_size, error_value / pool_area)
+    def grad_single(grad_out):
+      grad_in = jnp.zeros((H, W))
+      for i in range(pooled_H):
+        for j in range(pooled_W):
+          h_start, h_end = i * stride_H, i * stride_H + pool_H
+          w_start, w_end = j * stride_W, j * stride_W + pool_W
+          grad_in = grad_in.at[h_start:h_end, w_start:w_end].add(grad_out[i, j] / pool_area)
+      return grad_in
 
-    distribute_spatial_gradients = jax.vmap(distribute_gradient)
-    
-    # reshapehe error tensor to (N * C, H_out * W_out)
-    error_reshaped = error.reshape(N * C, pooled_H, pooled_W)
-
-    # apply the function to the error.
-    distributed_gradients = jax.vmap(distribute_spatial_gradients)(error_reshaped) # shape (N * C, H_out, W_out, H_k, W_k).
-    
-    final_shape = (N, C, H, W) # The new shape is (N, C, H, W).
-    upstream_gradient = distributed_gradients.reshape(final_shape)
-
+    grad_fn = jax.vmap(jax.vmap(grad_single, in_axes=0), in_axes=0)
+    upstream_gradient = grad_fn(error)
     return upstream_gradient, {}
 
 class Flatten:
@@ -581,25 +706,15 @@ class Flatten:
     flattened_size = 1
     for dim in fan_in_shape:
       flattened_size *= dim
-        
     self.input_shape = fan_in_shape
-    
-    # Flatten layer has no parameters
     return {}, (int(flattened_size),)
 
   def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # since all inputs are transposed, the input to this layer will be goofy if its composed of 2d images.
-    # input format: (batch, channels, height, width)
-    
+    # Flatten batch to (batch, features)
     flattened_output = inputs.reshape(inputs.shape[0], -1)
-    
-    # For a Flatten layer, we return the original inputs for the backward pass
-    return flattened_output.T, inputs 
+    return flattened_output.T, inputs  # Keep inputs for backprop
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    #(self, params: dict, inputs_original_shape: jnp.ndarray, error: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-
     upstream_gradient = error.T.reshape(inputs.shape)
-
     return upstream_gradient, {}
 

@@ -417,28 +417,57 @@ class Sequential:
         if type(layer) in (Flatten, MaxPooling, MeanPooling):
           continue
         
-        layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
-          learning_rate,
-          layer_params['weights'],
-          gradients['weights'],
-          opt_state[f'layer_{layer_index}']['weights'],
-          timestep=timestep,
-          **optimizer_hyperparams
-        )
+        if type(layer) == Recurrent:
+          new_layer_params = {}
+          new_opt_state = {}
+
+          for cell_key, cell_params in layer_params.items():
+            cell_grads = gradients[cell_key]
+            new_cell_params = {}
+            new_cell_opt_state = {}
+
+            for param_name, param_value in cell_params.items():
+              updated_param, updated_opt_state = self.optimizer(
+                  learning_rate,
+                  param_value,
+                  cell_grads[param_name],
+                  opt_state[f'layer_{layer_index}'][cell_key][param_name],
+                  timestep=timestep,
+                  **optimizer_hyperparams
+              )
+              new_cell_params[param_name] = updated_param
+              new_cell_opt_state[param_name] = updated_opt_state
+
+            new_layer_params[cell_key] = new_cell_params
+            new_opt_state[cell_key] = new_cell_opt_state
+
+          parameters_pytree[f'layer_{layer_index}'] = new_layer_params
+          opt_state[f'layer_{layer_index}'] = new_opt_state
+
+          
+        else:
+          layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
+            learning_rate,
+            layer_params['weights'],
+            gradients['weights'],
+            opt_state[f'layer_{layer_index}']['weights'],
+            timestep=timestep,
+            **optimizer_hyperparams
+          )
+          
+          layer_params_biases, opt_state[f'layer_{layer_index}']['biases'] = self.optimizer(
+            learning_rate,
+            layer_params['biases'],
+            gradients['biases'],
+            opt_state[f'layer_{layer_index}']['biases'],
+            timestep=timestep,
+            **optimizer_hyperparams
+          )
         
-        layer_params_biases, opt_state[f'layer_{layer_index}']['biases'] = self.optimizer(
-          learning_rate,
-          layer_params['biases'],
-          gradients['biases'],
-          opt_state[f'layer_{layer_index}']['biases'],
-          timestep=timestep,
-          **optimizer_hyperparams
-        )
-        
-        parameters_pytree[f'layer_{layer_index}'] = {
-          'weights': layer_params_weights,
-          'biases': layer_params_biases
-        }
+          parameters_pytree[f'layer_{layer_index}'] = {
+            'weights': layer_params_weights,
+            'biases': layer_params_biases
+          }
         
       return parameters_pytree, opt_state
     
@@ -471,43 +500,43 @@ class Sequential:
 
       epoch_loss = 0.0
 
-      for base_index in utility.progress_bar(range(0, len(features), self.batchsize),"> Processing Batch",f"Epoch {epoch+1}/{self.epochs} ({round( (epoch/(self.epochs))*100 , 2)}%)",decimals=2, length=100, empty=' ') if self.verbose == 2 else range(0, len(features), self.batchsize):
-
-        key = jax.random.PRNGKey(random.randint(0, 2**32))  # Use a seeded key for reproducibility
+      for base_index in range(0, len(features), self.batchsize):
+        key = jax.random.PRNGKey(random.randint(0, 2**32))  
 
         num_samples = features.shape[0]
-
-        # Generate a shuffled array of indices
         shuffled_indices = jax.random.permutation(key, num_samples)
 
-        # Use the shuffled indices to create a randomized dataset
         randomized_features = features[shuffled_indices]
         randomized_targets = targets[shuffled_indices]
 
-        # Now, create your batches from the randomized data
-        batch_features = randomized_features[base_index : self.batchsize]
-        batch_targets = randomized_targets[base_index : self.batchsize]
+        batch_features = randomized_features[base_index : base_index + self.batchsize]
+        batch_targets = randomized_targets[base_index : base_index + self.batchsize]
         
-        activations_and_weighted_sums = propagate(batch_features.T, self.params_pytree)
+        # no transpose
+        activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
+
+        # loss works on (batch, outputs)
+        # print(batch_targets)
+        # print(activations_and_weighted_sums['activations'][-1])
         
-        epoch_loss += self.loss_function(batch_targets.T, activations_and_weighted_sums['activations'][-1]).item() # Accumulate loss
         
-        initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1].T)
-        
+        epoch_loss += self.loss_function(batch_targets, activations_and_weighted_sums['activations'][-1])
+
+        # error = dL/dy
+        initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
+
         timestep += 1
         current_params, current_opt_state = step(
-          tuple(self.layers),
-          backward_func_tuple,
-          
-          initial_error.T,
-          self.params_pytree,
-          self.opt_state,
-          activations_and_weighted_sums['activations'],
-          activations_and_weighted_sums['weighted_sums'],
-          
-          timestep,
-          self.optimizer_hyperparams,
-          learning_rate
+            tuple(self.layers),
+            backward_func_tuple,
+            initial_error,  # no transpose
+            self.params_pytree,
+            self.opt_state,
+            activations_and_weighted_sums['activations'],
+            activations_and_weighted_sums['weighted_sums'],
+            timestep,
+            self.optimizer_hyperparams,
+            learning_rate
         )
 
         self.params_pytree = current_params
@@ -531,11 +560,11 @@ class Sequential:
     Propagates the input through the entire model, excluding dropout layers (if any).
     weights will not be updated.
     """
-    x = inputs.T
+    x = inputs
     for i, layer in enumerate(self.layers):
       
       layer_params = self.params_pytree.get(f'layer_{i}', {})
       x, weighted_sum = layer.apply(layer_params, x)
       
-    return x.T
+    return x
 
