@@ -660,7 +660,7 @@ class Sequential:
       raise ValueError("logging must be greater than or equal to 1, or set 'verbose' to 0 if the intent is to show nothing")
     if self.verbose < 0:
       raise ValueError("verbose must be greater than or equal to 0, or set 'verbose' to 0 if the intent is to show nothing")
-    if self.validation not in Key.METRICS and self.validation not in Key.ERROR:
+    if self.validation not in Key.METRICS and self.validation not in Key.LOSS:
       raise ValueError("validation must be a string of a valid metric or loss function")
       
     # Compiler - error prevention
@@ -669,9 +669,9 @@ class Sequential:
     if self.optimizer not in Key.OPTIMIZER:
       raise ValueError(f"Invalid optimizer: {self.optimizer}")
     for metric in metrics:
-      if (metric not in Key.METRICS) and (metric not in Key.ERROR):
+      if (metric not in Key.METRICS) and (metric not in Key.LOSS):
         raise ValueError(f"Invalid metric: {metric}")
-    if self.loss not in Key.ERROR:
+    if self.loss not in Key.LOSS:
       raise ValueError(f"Invalid loss: {self.loss}")
     
     # the actual compiling happens in the fit() method
@@ -1976,7 +1976,7 @@ class Sequential:
           
           predicted_values.append(predicted)
         
-        if self.validation in Key.ERROR:
+        if self.validation in Key.LOSS:
           for true, pred in zip(validation_targets, predicted_values):
           
             validation_loss += Key.LOSS[self.loss](true, pred)

@@ -17,14 +17,14 @@ At its core, PyNet is a Library full of layers, activation functions, models and
 The main and first API built for the PyNet framework, everthing is built entirely on python with object-oriented programming as the main programming paradigm for each layer. But because everything is entirely built on Python, training can be quite slow depending on the machine and therefore, is not advised to serve as a general-purpose library; Other, more proffesionally developed libraries may suite the task at hand. 
 
 **NetCore Features:**
-  - Multichannel Convolution
   - Dense
-  - Localunit (Locally Connected Neurons)
+  - Localunit (Locally Connected Layer)
+  - Operation
+  - Multichannel Convolution
   - Maxpooling
   - Meanpooling
   - Flatten
   - Reshape
-  - Operation (Normalization and Activation functions)
   - RecurrentBlock
   - RNN
   - LSTM
@@ -34,12 +34,18 @@ The main and first API built for the PyNet framework, everthing is built entirel
 
 The second API of PyNet, this time built around the JAX ecosystem, leveraging parralelized JNP operations and JIT-compiled systems to boost calculations up to 5x the speed thanks to the XLA compiler. Everything is designed to be modular, so a custom layer can be passed into the sequential class as long as it adheres to NetFlash spesifications. More information on the documentation.
 
-**Default NetFlash Features:**
+**NetFlash Features:**
   - Dense
-  - Flatten
+  - Localunit (Locally Connected Layer)
   - Multichannel Convolution
   - Maxpooling
   - Meanpooling
+  - Flatten
+  - Operation
+  - Recurrent Layer
+  - GRU (Gated Recurrent Unit) Layer
+  - LSTM (Long Sort Term Memory) Layer
+  - Multiheaded Self-Attention
 
 ## PyNet Alpha
 

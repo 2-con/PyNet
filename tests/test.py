@@ -10,11 +10,11 @@ import time
 import math
 import random
 import numpy as np
-from core.encoder import OneHotEncode
+from core.vanilla.encoder import OneHotEncode
 from tools.visual import display_boundary
 
 start_time = time.perf_counter()
-test = 2
+test = 8
 
 if test == 1: # CNN
 
@@ -553,8 +553,8 @@ elif test == 8: # 2D test
     batch_size=1,
     epochs=500,
     metrics=['accuracy'],
-    logging=100,
-    verbose=3
+    logging=10,
+    verbose=1
   )
   
   model.fit(

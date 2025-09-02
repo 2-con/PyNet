@@ -17,6 +17,33 @@ from core.vanilla.utility import do_nothing
 
 class Key:
 
+  ACTIVATION = {
+    # rectifiers
+    'relu': Activation.ReLU,
+    'softplus': Activation.Softplus,
+    'mish': Activation.Mish,
+    'swish': Activation.Swish,
+    'leaky relu': Activation.Leaky_ReLU,
+    'elu': Activation.ELU,
+    'gelu': Activation.GELU,
+    'selu': Activation.SELU,
+    'reeu': Activation.ReEU,
+    'none': Activation.Linear,
+    'retanh': Activation.ReTanh,
+
+    # normalization functions
+    'binary step': Activation.Binary_step,
+    'softsign': Activation.Softsign,
+    'sigmoid': Activation.Sigmoid,
+    'tanh': Activation.Tanh,
+    
+    # parametric functions
+    'elu': Activation.ELU,
+    'selu': Activation.SELU,
+    'prelu': Activation.PReLU,
+    'silu': Activation.SiLU
+  }
+  
   ACTIVATION_DERIVATIVE = {
     # rectifiers
     'relu': Derivative.ReLU_derivative,
@@ -66,6 +93,14 @@ class Key:
     'softsign': do_nothing,
     'sigmoid': do_nothing,
     'tanh': do_nothing,
+  }
+  
+  SCALER = {
+    'standard scaler': scaler.standard_scaler,
+    'min max scaler': scaler.min_max_scaler,
+    'max abs scaler': scaler.max_abs_scaler,
+    'robust scaler': scaler.robust_scaler,
+    'softmax': scaler.softmax,
   }
 
   SCALER_DERIVATIVE = {

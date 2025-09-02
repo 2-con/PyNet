@@ -17,14 +17,12 @@ Provides
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.activation import Sigmoid
-import core.optimizer as optimizer
+from core.vanilla.activation import Sigmoid
+import core.vanilla.optimizer as Optimizer
 import tools.utility as utility
 from api.netcore import Key
 import random, numpy as np, math, itertools
 from tools.math import sgn
-
-Optimizer = optimizer.Optimizer # set global object
 
 class Linear:
   def __init__(self, input_size, output_size):
@@ -51,8 +49,6 @@ class Linear:
     self.input_size     = input_size
     self.output_size    = output_size
     self.error_logs = []
-
-    self.optimizer_instance = Optimizer()
     
     self.neurons = [
       {
@@ -177,6 +173,9 @@ class Linear:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
 
         for weight_index, weight in enumerate(neuron['weights']):
@@ -189,7 +188,7 @@ class Linear:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias
         bias_gradient = error[neuron_index]
@@ -198,7 +197,7 @@ class Linear:
           bias_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -218,7 +217,7 @@ class Linear:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         
@@ -281,7 +280,7 @@ class Polynomial:
     self.output_size    = output_size
     self.error_logs = []
     self.degree = degree
-    self.optimizer_instance = Optimizer()
+    
     
     self.neurons = [
       {
@@ -409,6 +408,9 @@ class Polynomial:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
 
         for weight_index, weight in enumerate(neuron['weights']):
@@ -421,7 +423,7 @@ class Polynomial:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias
         bias_gradient = error[neuron_index]
@@ -430,7 +432,7 @@ class Polynomial:
           bias_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -450,7 +452,7 @@ class Polynomial:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         
@@ -530,7 +532,7 @@ class Logistic:
     self.output_size    = output_size
     self.error_logs = []
     self.degree = degree
-    self.optimizer_instance = Optimizer()
+    
     
     self.neurons = [
       {
@@ -672,6 +674,9 @@ class Logistic:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
 
         for weight_index, weight in enumerate(neuron['weights']):
@@ -684,7 +689,7 @@ class Logistic:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias
         bias_gradient = error[neuron_index]
@@ -693,7 +698,7 @@ class Logistic:
           bias_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -713,7 +718,7 @@ class Logistic:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         
@@ -791,7 +796,7 @@ class Exponential:
     self.output_size    = output_size
     self.error_logs = []
 
-    self.optimizer_instance = Optimizer()
+    
     
     self.neurons = [
       {
@@ -924,6 +929,9 @@ class Exponential:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
         
         total_x = sum([weight * input[weight_index] for weight_index, weight in enumerate(neuron['weights'])])
@@ -938,7 +946,7 @@ class Exponential:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias, intercept and factor
         bias_gradient      = error[neuron_index]
@@ -951,13 +959,13 @@ class Exponential:
           factor_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
         
         param_id += 1
-        neuron['intercept'] = optimize(learning_rate, neuron['intercept'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['intercept'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['intercept'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
         
         param_id += 1
-        neuron['factor'] = optimize(learning_rate, neuron['factor'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['factor'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['factor'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -977,7 +985,7 @@ class Exponential:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         
@@ -1094,7 +1102,7 @@ class Power:
     self.output_size    = output_size
     self.error_logs = []
 
-    self.optimizer_instance = Optimizer()
+    
     
     self.neurons = [
       {
@@ -1224,6 +1232,9 @@ class Power:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
         
         full_x = sum([weight * input[index] for index, weight in enumerate(neuron['weights'])])
@@ -1238,7 +1249,7 @@ class Power:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         # Updating bias, multiplier and exponent
         bias_gradient = error[neuron_index]
@@ -1251,13 +1262,13 @@ class Power:
           exponent_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         param_id += 1
-        neuron['multiplier'] = optimize(learning_rate, neuron['multiplier'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['multiplier'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['multiplier'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         param_id += 1
-        neuron['exponent'] = optimize(learning_rate, neuron['exponent'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['exponent'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['exponent'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -1277,7 +1288,7 @@ class Power:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         
@@ -1339,7 +1350,7 @@ class Logarithmic:
     self.output_size    = output_size
     self.error_logs = []
 
-    self.optimizer_instance = Optimizer()
+    
     
     self.neurons = [
       {
@@ -1468,6 +1479,9 @@ class Logarithmic:
       learning_rate = self.learning_rate
       param_id = 0 # must be a positive integer
       
+      storage_1 = {}
+      storage_2 = {}
+      
       for neuron_index, neuron in enumerate(self.neurons):
         
         full_x = sum([weight * input[index] for index, weight in enumerate(neuron['weights'])])
@@ -1482,7 +1496,7 @@ class Logarithmic:
 
           # Update weights
           param_id += 1
-          neuron['weights'][weight_index] = optimize(learning_rate, weight, weight_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+          neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
         
         # Updating bias, multiplier and exponent
         bias_gradient = error[neuron_index]
@@ -1493,10 +1507,10 @@ class Logarithmic:
           multiplier_gradient /= batchsize
 
         param_id += 1
-        neuron['bias'] = optimize(learning_rate, neuron['bias'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['bias'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['bias'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
         param_id += 1
-        neuron['multiplier'] = optimize(learning_rate, neuron['multiplier'], bias_gradient, self.optimizer_instance, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
+        neuron['multiplier'] = Key.OPTIMIZER[self.optimizer](learning_rate, neuron['multiplier'], bias_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
 
     epochs = self.epochs + 1
     verbose = self.verbose
@@ -1516,7 +1530,7 @@ class Logarithmic:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.ERROR[self.loss](targets[base_index + batch_index], activations)
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
         
         timestep += 1
         

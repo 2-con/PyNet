@@ -3,7 +3,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import jax
 import jax.numpy as jnp
-import random
+import typing
 
 from system.config import *
 import core.flash.activation as activation
@@ -72,8 +72,7 @@ class Key:
     "standard scaler": scaler.Standard_Scaler,
     "min max scaler": scaler.Min_Max_Scaler,
     "max abs scaler": scaler.Max_Abs_Scaler,
-    "robust scaler": scaler.Robust_Scaler,
-    "softmax": activation.Softmax
+    "robust scaler": scaler.Robust_Scaler
   }
   
   SCALER_DERIVATIVE = {
@@ -115,32 +114,12 @@ returns:
 
 """ Todo:
 
-(Learnable layers)
-  1. Convolution
-  2. Dense
-  3. Localunit
 
-  (Utility layers)
-  1. Maxpooling
-  2. Meanpooling
-  3. Flatten
-  4. Reshape
-  5. Operation (normalization and activation functions)
-  
-  (Architectural layers)
-  1. RecurrentBlock
-  
-  (Recurrent units)
-  1. Recurrent
-  2. LSTM
-  3. GRU
 
 """
 
-from tools.visual import dictionary_display as display
-
 class Dense:
-  def __init__(self, neurons:int, activation, **kwargs):
+  def __init__(self, neurons:int, activation, name:str="Null", *args, **kwargs):
     """
     Dense
     -----
@@ -190,18 +169,18 @@ class Dense:
     - None
     """
     self.neuron_amount = neurons
-    self.activation_name = activation.lower()
+    self.name = name
     
-    if self.activation_name not in Key.ACTIVATION:
+    if activation.lower() not in Key.ACTIVATION:
       raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
     
-    self.activation_fn = Key.ACTIVATION[self.activation_name]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[self.activation_name]
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
 
     self.initializer_fn = Key.INITIALIZER['default']
-    if self.activation_name in rectifiers:
+    if activation.lower() in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif self.activation_name in normalization:
+    elif activation.lower() in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -211,23 +190,148 @@ class Dense:
 
     self.input_size = None
 
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int):
+  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
     self.input_size = fan_in[0]
     weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in[0], fan_out_shape)
     biases = jnp.zeros((self.neuron_amount,))
     return {'weights': weights, 'biases': biases}, (self.neuron_amount,)
 
-  def apply(self, params:dict, inputs:jnp.ndarray):
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, in_features), weights: (in_features, out_features)
     weighted_sums = inputs @ params['weights'] + params['biases']
     activated_output = self.activation_fn(weighted_sums)
     return activated_output, weighted_sums
 
-  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray):
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     # error: (batch, out_features), inputs: (batch, in_features)
     grads_z = self.activation_derivative_fn(error, weighted_sums)
 
     grads_weights = jnp.einsum("bi,bj->ij", inputs, grads_z)  # (in_features, out_features)
+    
+    grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
+    upstream_gradient = grads_z @ params['weights'].T  # (batch, in_features)
+
+    param_grads = {
+      'weights': grads_weights,
+      'biases': grads_biases
+    }
+
+    return upstream_gradient, param_grads
+
+class Localunit:
+  def __init__(self, receptive_field:int, activation, name:str="Null", *args, **kwargs):
+    """
+    LocalUnit (Locally Connected Layer)
+    -----
+      A locally connected layer that connects the previous layer to the next layer. Accepts and returns 1D arrays (excludes batch dimension), so input_shape should be of the form
+      (input_size,), anything after the 1st dimention will be ignored.
+    -----
+    Args
+    -----
+    - neurons     (int)     : the number of neurons in the layer
+    - activation  (string)  : the activation function
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    self.receptive_field = receptive_field
+    self.name = name
+    
+    if activation.lower() not in Key.ACTIVATION:
+      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
+    
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+
+    self.initializer_fn = Key.INITIALIZER['default']
+    if activation.lower() in rectifiers:
+      self.initializer_fn = Key.INITIALIZER['he normal']
+    elif activation.lower() in normalization:
+      self.initializer_fn = Key.INITIALIZER['glorot normal']
+
+    if 'initializer' in kwargs:
+      if kwargs['initializer'].lower() not in Key.INITIALIZER:
+        raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+
+    self.input_size = None
+
+  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+    
+    # generating the slide pattern
+    ans = []
+    height = (fan_in[0] - self.receptive_field) + 1
+    
+    if height < 1:
+      raise ValueError("Field size must be less than or equal to width.")
+    if self.receptive_field < 0 or fan_in[0] < 0:
+      raise ValueError("Width or field size must be non-negative.")
+    
+    for i in range(height):
+      row = [0 for _ in range(fan_in[0])]
+      
+      for j in range(fan_in[0]):
+        
+        if j+i < fan_in[0] and j+i >= i and j < self.receptive_field:
+          row[j+i] = 1
+      
+      ans.append(row)
+
+    # permanent localunit weight mask
+    self.mask = jnp.array(ans).T
+    
+    self.input_size = fan_in[0]
+    weights = self.initializer_fn((self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape)
+    biases = jnp.zeros((self.mask.shape[1],))
+    
+    return {'weights': weights, 'biases': biases}, (self.mask.shape[0],)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # inputs: (batch, in_features), weights: (in_features, out_features)
+    weighted_sums = inputs @ (params['weights'] * self.mask) + params['biases']
+    activated_output = self.activation_fn(weighted_sums)
+    return activated_output, weighted_sums
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    # error: (batch, out_features), inputs: (batch, in_features)
+    grads_z = self.activation_derivative_fn(error, weighted_sums)
+
+    grads_weights = jnp.einsum("bi,bj->ij", inputs, grads_z) * self.mask  # (in_features, out_features)
+    
     grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
     upstream_gradient = grads_z @ params['weights'].T  # (batch, in_features)
 
@@ -239,7 +343,7 @@ class Dense:
     return upstream_gradient, param_grads
 
 class Convolution:
-  def __init__(self, kernel: tuple[int, int], channels: int, activation: str, stride: tuple[int, int] = (1, 1), **kwargs):
+  def __init__(self, kernel: tuple[int, int], channels: int, activation: str, stride: tuple[int, int] = (1, 1), name:str="Null", *args, **kwargs):
     """
     Convolution
     -----
@@ -292,6 +396,7 @@ class Convolution:
     self.kernel = kernel
     self.channels = channels
     self.stride = stride
+    self.name = name
 
     if activation.lower() not in Key.ACTIVATION:
       raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
@@ -319,7 +424,7 @@ class Convolution:
       else:
         self.initializer_fn = Key.INITIALIZER["default"]
 
-  def calibrate(self, fan_in_shape: tuple[int, int, int], fan_out_shape: int):
+  def calibrate(self, fan_in_shape: tuple[int, int, int], fan_out_shape: int) -> tuple[dict, tuple[int, ...]]:
     # fan_in_shape = (C_in, H, W)
     C_in, H, W = fan_in_shape
 
@@ -337,7 +442,7 @@ class Convolution:
 
     return self.params, self.output_shape
 
-  def apply(self, params: dict, inputs: jnp.ndarray):
+  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
     inputs: (N, C_in, H, W)
     weights: (C_out, C_in, kH, kW)
@@ -359,7 +464,7 @@ class Convolution:
     activated = self.activation_function(WS)
     return activated, WS
 
-  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray):
+  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     if inputs.ndim != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
@@ -450,8 +555,60 @@ class Convolution:
     return upstream_gradient, param_gradients
 
 class Recurrent:
-  def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, **kwargs):
+  def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
+    """
+    Recurrent
+    -----
+      Recurrent layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
+      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+    -----
+    Args
+    -----
+    - Cells        (int)    : the number of cells in the layer
+    - activation   (string) : the activation function for the layer
+    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    
     self.cells = cells
+    self.name = name
 
     assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
 
@@ -472,8 +629,9 @@ class Recurrent:
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]):
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
     features, sequence_length = fan_in_shape
+    
     if self.input_sequence is None:
       self.input_sequence = tuple([_ for _ in range(features)]) 
     if self.output_sequence is None:
@@ -484,11 +642,12 @@ class Recurrent:
       params[f'cell_{cell_index}'] = {
         'input_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
         'carry_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        'bias': jnp.zeros(sequence_length)
+        'final_weights': self.initializer_fn((sequence_length * 2, sequence_length), features, fan_out_shape[0]),
+        'final_bias': jnp.zeros(sequence_length * 2)
       }
-    return params, self.output_sequence
+    return params, (len(self.output_sequence),sequence_length)
 
-  def apply(self, params:dict, inputs:jnp.ndarray):
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, seq_len, features)
     batches, seq_len, features = inputs.shape
     per_batch_output = []
@@ -504,40 +663,35 @@ class Recurrent:
         cell_params = params[f'cell_{cell_index}']
 
         input_vector = jnp.zeros(features)
+        
         if cell_index in self.input_sequence:
           input_feature_idx = self.input_sequence.index(cell_index)
           input_vector = inputs[n, input_feature_idx, :]  # take entire sequence
 
-        # print(input_vector)
-        # print(cell_params['input_weights'])
-        # exit()
+        weighted_input = input_vector * cell_params['input_weights']
+        weighted_carry = input_carry  * cell_params['carry_weights']
 
-        weighted_input = jnp.dot(input_vector, cell_params['input_weights'])
-        
-        # print(input_carry)
-        # print(cell_params['carry_weights'])
-        # exit()
-        
-        weighted_carry = jnp.dot(input_carry, cell_params['carry_weights'])
-        WS = weighted_input + weighted_carry + cell_params['bias']
+        merged = jnp.concatenate((weighted_carry, weighted_input)) + cell_params['final_bias']
 
-        output_carry = self.activation_fn(WS)
-        weighted_sums.append(WS)
+        output_carry = self.activation_fn(merged @ cell_params['final_weights'])
+        weighted_sums.append([
+          merged, merged @ cell_params['final_weights']
+          ])
 
-        if cell_index in self.output_sequence:
-          outputs.append(output_carry)
+        outputs.append(output_carry) if cell_index in self.output_sequence else do_nothing()
 
       per_batch_output.append(outputs)
       per_batch_WS.append(weighted_sums)
 
-    return jnp.array(per_batch_output), jnp.array(per_batch_WS)
+    return jnp.array(per_batch_output), per_batch_WS
 
-  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray):
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     batches, seq_len, features = inputs.shape
     grads = {k: {
       "input_weights": jnp.zeros_like(v["input_weights"]),
       "carry_weights": jnp.zeros_like(v["carry_weights"]),
-      "bias": jnp.zeros_like(v["bias"])
+      "final_weights": jnp.zeros_like(v["final_weights"]),
+      "final_bias": jnp.zeros_like(v["final_bias"])
     } for k, v in params.items()}
 
     input_grads = jnp.zeros_like(inputs)
@@ -548,15 +702,16 @@ class Recurrent:
       for cell_index in reversed(range(self.cells)):
         
         cell_params = params[f'cell_{cell_index}']
-        WS = weighted_sums[n, cell_index]
+        final_input = weighted_sums[n][cell_index][0]
+        WS = weighted_sums[n][cell_index][1]
 
         local_error = error[n, cell_index] + grad_carry
         
-        # print(local_error)
-        # print(WS)
-        # exit()
+        grads_z = self.activation_derivative_fn(local_error, WS)
         
-        delta = self.activation_derivative_fn(local_error, WS)
+        grads_weights = jnp.outer(final_input, grads_z)  # (in_features, out_features)
+        grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
+        upstream_gradient = grads_z @ cell_params['final_weights'].T  # (batch, in_features)
 
         if cell_index in self.input_sequence:
           input_feature_idx = self.input_sequence.index(cell_index)
@@ -564,46 +719,740 @@ class Recurrent:
         else:
           input_vector = jnp.zeros(seq_len)
 
-        prev_carry = jnp.zeros(features) if cell_index == 0 else weighted_sums[n, cell_index-1]
-
-        # print(delta)
-        # print(prev_carry)
-        # print(params[f'cell_{cell_index}']['carry_weights'])
-        # exit()
+        prev_carry = jnp.zeros(features) if cell_index == 0 else weighted_sums[n][cell_index-1]
         
-        grads[f'cell_{cell_index}']["input_weights"] += jnp.dot(input_vector, delta)
-        grads[f'cell_{cell_index}']["carry_weights"] += jnp.dot(prev_carry, delta)
-        grads[f'cell_{cell_index}']["bias"] += delta
+        grads[f'cell_{cell_index}']["input_weights"] += upstream_gradient[:len(grads[f'cell_{cell_index}']["input_weights"])]
+        grads[f'cell_{cell_index}']["carry_weights"] += upstream_gradient[len(grads[f'cell_{cell_index}']["input_weights"]):]
+        grads[f'cell_{cell_index}']["final_weights"] += grads_weights
+        grads[f'cell_{cell_index}']["final_bias"]    += grads_biases
 
         if cell_index in self.input_sequence:
-          
-          input_grads = input_grads.at[n, :, input_feature_idx].add(delta @ cell_params['input_weights'].T)
+          input_grads = input_grads.at[n, :, input_feature_idx].add(grads_z @ cell_params['input_weights'].T)
 
-        grad_carry = delta @ cell_params['carry_weights'].T
+        grad_carry = grads_z @ cell_params['carry_weights'].T
 
     return input_grads, grads
 
+class LSTM:
+  def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
+    """
+    LSTM (Long Short-Term Memory)
+    -----
+      a Long Short-Term Memory layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
+      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+    -----
+    Args
+    -----
+    - Cells        (int)    : the number of cells in the layer
+    - activation   (string) : the activation function for the layer
+    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
 
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    
+    self.cells = cells
+    self.name = name
 
+    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
 
+    # final head activation (pointwise) and derivative signature same as your framework
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
 
+    # initializer selection matching your Recurrent
+    self.initializer_fn = Key.INITIALIZER['default']
+    if activation in rectifiers:
+      self.initializer_fn = Key.INITIALIZER['he normal']
+    elif activation in normalization:
+      self.initializer_fn = Key.INITIALIZER['glorot normal']
 
+    if 'initializer' in kwargs:
+      if kwargs['initializer'].lower() not in Key.INITIALIZER:
+        raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
 
+    self.input_sequence = input_sequence
+    self.output_sequence = output_sequence
 
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
 
+    sequence_length, features = fan_in_shape
 
+    if sequence_length != self.cells:
+      raise ValueError(f"calibrate mismatch: sequence_length={sequence_length} but self.cells={self.cells}")
 
+    if self.input_sequence is None:
+      self.input_sequence = tuple([_ for _ in range(self.cells)])
+    if self.output_sequence is None:
+      self.output_sequence = tuple([_ for _ in range(self.cells)])
 
+    concat_size = features * 2  # merged = concat(weighted_carry, weighted_input)
 
+    params = {}
+    for cell_index in range(self.cells):
+      params[f'cell_{cell_index}'] = {
+        # elementwise multipliers (preserve length)
+        'input_weights': self.initializer_fn((features,), features, features),
+        'carry_weights': self.initializer_fn((features,), features, features),
 
+        'forget_weights': self.initializer_fn((concat_size, features), concat_size, features),
+        'forget_bias': jnp.zeros((features,)),
 
+        'input_gate_weights': self.initializer_fn((concat_size, features), concat_size, features),
+        'input_gate_bias': jnp.zeros((features,)),
+
+        'output_gate_weights': self.initializer_fn((concat_size, features), concat_size, features),
+        'output_gate_bias': jnp.zeros((features,)),
+
+        'candidate_weights': self.initializer_fn((concat_size, features), concat_size, features),
+        'candidate_bias': jnp.zeros((features,)),
+
+        'final_weights': self.initializer_fn((concat_size, features), concat_size, features),
+        'final_bias': jnp.zeros((concat_size,))
+      }
+    return params, (len(self.output_sequence),sequence_length)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    batches, cells_dim, features = inputs.shape
+    if cells_dim != self.cells:
+      raise ValueError(f"apply mismatch: inputs has cells_dim={cells_dim} but self.cells={self.cells}")
+
+    per_batch_output = []
+    per_batch_WS = []
+
+    for n in range(batches):
+      # initial carry / hidden are zeros (preserve-length)
+      input_carry = jnp.zeros((features,))
+      c_t = jnp.zeros((features,))    # cell state (kept for completeness, used in gating)
+      h_t = jnp.zeros((features,))
+
+      weighted_sums = []
+      outputs = []
+
+      for cell_index in range(self.cells):
+        cell_params = params[f'cell_{cell_index}']
+
+        # elementwise weighted inputs
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          input_vector = inputs[n, input_feature_idx, :]
+        else:
+          input_vector = jnp.zeros((features,))
+
+        weighted_input = input_vector * cell_params['input_weights']   # elementwise
+        weighted_carry = input_carry * cell_params['carry_weights']    # elementwise
+
+        # merged concat (carry first, input second) + final_bias (matches your Recurrent idea)
+        merged = jnp.concatenate((weighted_carry, weighted_input)) + cell_params['final_bias']  # (2*features,)
+
+        # gates: merged -> features (fully connected preserving length)
+        z_f = jnp.dot(merged, cell_params['forget_weights']) + cell_params['forget_bias']
+        z_i = jnp.dot(merged, cell_params['input_gate_weights']) + cell_params['input_gate_bias']
+        z_g = jnp.dot(merged, cell_params['candidate_weights']) + cell_params['candidate_bias']
+        z_o = jnp.dot(merged, cell_params['output_gate_weights']) + cell_params['output_gate_bias']
+
+        f_t = Key.ACTIVATION['sigmoid'](z_f)
+        i_t = Key.ACTIVATION['sigmoid'](z_i)
+        o_t = Key.ACTIVATION['sigmoid'](z_o)
+        g_t = Key.ACTIVATION['tanh'](z_g)
+
+        # cell + hidden update (standard LSTM equations but using merged->gates)
+        c_prev = c_t
+        h_prev = h_t
+
+        c_t = f_t * c_prev + i_t * g_t
+        h_t = o_t * Key.ACTIVATION['tanh'](c_t)
+
+        # final FC head (merged -> features) then activation_fn (pointwise)
+        act_WS = jnp.dot(merged, cell_params['final_weights'])   # (features,)
+        output_carry = self.activation_fn(act_WS)
+
+        # stash all needed values for backward
+        WS = {
+          'merged': merged, 
+          'act_WS': act_WS,
+          
+          'z_f': z_f,                                                                                                                                               
+          'z_i': z_i, 
+          'z_o': z_o, 
+          'z_g': z_g,
+          
+          'f_t': f_t, 
+          'i_t': i_t, 
+          'o_t': o_t, 
+          'g_t': g_t,
+          
+          'c_prev': c_prev, 
+          'c_t': c_t,
+          
+          'h_prev': h_prev, 
+          'h_t': h_t,
+          
+          'input_vector': input_vector,
+          'weighted_input': weighted_input, 'weighted_carry': weighted_carry
+        }
+        weighted_sums.append(WS)
+
+        # collect outputs in order of output_sequence (same as your Recurrent)
+        if cell_index in self.output_sequence:
+          outputs.append(output_carry)
+
+        # next cell's carry / hidden
+        input_carry = output_carry   # keep the same naming as your Recurrent
+
+      per_batch_output.append(jnp.stack(outputs, axis=0) if len(outputs) > 0 else jnp.zeros((0, features)))
+      per_batch_WS.append(weighted_sums)
+
+    return jnp.stack(per_batch_output, axis=0), per_batch_WS
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:list) -> tuple[jnp.ndarray, dict]:
+    batches, cells_dim, features = inputs.shape
+    if cells_dim != self.cells:
+      raise ValueError(f"backward mismatch: inputs has cells_dim={cells_dim} but self.cells={self.cells}")
+
+    # prepare grads per-cell
+    grads = {k: {
+      "input_weights": jnp.zeros_like(v["input_weights"]),
+      "carry_weights": jnp.zeros_like(v["carry_weights"]),
+      
+      "forget_weights": jnp.zeros_like(v["forget_weights"]),
+      "forget_bias": jnp.zeros_like(v["forget_bias"]),
+      
+      "input_gate_weights": jnp.zeros_like(v["input_gate_weights"]),
+      "input_gate_bias": jnp.zeros_like(v["input_gate_bias"]),
+      
+      "output_gate_weights": jnp.zeros_like(v["output_gate_weights"]),
+      "output_gate_bias": jnp.zeros_like(v["output_gate_bias"]),
+      
+      "candidate_weights": jnp.zeros_like(v["candidate_weights"]),
+      "candidate_bias": jnp.zeros_like(v["candidate_bias"]),
+      
+      "final_weights": jnp.zeros_like(v["final_weights"]),
+      "final_bias": jnp.zeros_like(v["final_bias"]),
+    } for k, v in params.items()}
+
+    input_grads = jnp.zeros_like(inputs)
+
+    for n in range(batches):
+      # gradient carrying along the chain (for hidden / carry)
+      dh_next = jnp.zeros((features,))   # gradient w.r.t. next hidden (from future cell)
+      dc_next = jnp.zeros((features,))   # gradient w.r.t. next cell state
+
+      # iterate cells backward
+      for cell_index in reversed(range(self.cells)):
+        cell_key = f'cell_{cell_index}'
+        cell_params = params[cell_key]
+        WS = weighted_sums[n][cell_index]
+
+        merged = WS['merged']        # 2 * features
+        act_WS = WS['act_WS']        # features
+        
+        z_f = WS['z_f']; z_i = WS['z_i']; z_o = WS['z_o']; z_g = WS['z_g']
+        f_t = WS['f_t']; i_t = WS['i_t']; o_t = WS['o_t']; g_t = WS['g_t']
+        
+        c_prev = WS['c_prev']; c_t = WS['c_t']
+        h_prev = WS['h_prev']; h_t = WS['h_t']
+        
+        input_vector = WS['input_vector']
+
+        # get error slice if this cell produced an output
+        if cell_index in self.output_sequence:
+          k = self.output_sequence.index(cell_index)
+          d_y = error[n, k, :]
+        else:
+          d_y = jnp.zeros((features,))
+
+        # grads_z corresponds to delta in feature space after activation
+        grads_z = self.activation_derivative_fn(d_y, act_WS)   # (features,)
+        # final_weights gradient
+        grads[cell_key]['final_weights'] += jnp.outer(merged, grads_z)   # (2*features, features)
+
+        # gradient flowing back into merged from final head
+        upstream_from_final = jnp.dot(grads_z, cell_params['final_weights'].T)  # (2*features,)
+
+        grads[cell_key]['final_bias'] += upstream_from_final
+
+        # compute derivative wrt o, i, f, g using standard LSTM formulas
+        tanh_c = Key.ACTIVATION['tanh'](c_t)
+        # output gate
+        do = dh_next * tanh_c
+        do_raw = do * (o_t * (1.0 - o_t))   # σ'(z_o) with o_t
+
+        # cell state derivative
+        dc = dh_next * o_t * (1.0 - tanh_c ** 2) + dc_next
+
+        di_raw = (dc * g_t) * (i_t * (1.0 - i_t))   # σ'(z_i)
+        df_raw = (dc * c_prev) * (f_t * (1.0 - f_t))   # σ'(z_f)
+        dg_raw = (dc * i_t) * (1.0 - g_t ** 2)       # tanh'(z_g) via g_t
+
+        # accumulate gradients for gate FCs (merged -> features)
+        grads[cell_key]['forget_weights'] += jnp.outer(merged, df_raw)
+        grads[cell_key]['forget_bias'] += df_raw
+
+        grads[cell_key]['input_gate_weights'] += jnp.outer(merged, di_raw)
+        grads[cell_key]['input_gate_bias'] += di_raw
+
+        grads[cell_key]['output_gate_weights'] += jnp.outer(merged, do_raw)
+        grads[cell_key]['output_gate_bias'] += do_raw
+
+        grads[cell_key]['candidate_weights'] += jnp.outer(merged, dg_raw)
+        grads[cell_key]['candidate_bias'] += dg_raw
+
+        # gradient wrt merged coming from gate paths (via their weight matrices)
+        d_concat_from_gates = (
+          jnp.dot(df_raw, cell_params['forget_weights'].T) +
+          jnp.dot(di_raw, cell_params['input_gate_weights'].T) +
+          jnp.dot(do_raw, cell_params['output_gate_weights'].T) +
+          jnp.dot(dg_raw, cell_params['candidate_weights'].T)
+        )   # shape (2*features,)
+
+        # total gradient into merged = from final head + from gates
+        d_merged_total = upstream_from_final + d_concat_from_gates   # (2*features,)
+
+        # split into carry and input halves
+        d_weighted_carry = d_merged_total[:features]
+        d_weighted_input = d_merged_total[features:]
+
+        # weighted_input = input_vector * input_weights  -> d input_weights = input_vector * d_weighted_input
+        grads[cell_key]['input_weights'] += input_vector * d_weighted_input
+        grads[cell_key]['carry_weights'] += h_prev * d_weighted_carry
+
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          # derivative: weighted_input = input_vector * input_weights -> dx = d_weighted_input * input_weights
+          input_grads = input_grads.at[n, input_feature_idx, :].add(d_weighted_input * cell_params['input_weights'])
+
+        dh_prev_from_merged = d_weighted_carry * cell_params['carry_weights']
+
+        dh_next = dh_prev_from_merged
+        dc_next = dc * f_t
+
+    return input_grads, grads
+
+class GRU:
+  def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
+    """
+    GRU (Gated Recurrent Unit)
+    -----
+      a Gated Recurrent Unit layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
+      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+    -----
+    Args
+    -----
+    - Cells        (int)    : the number of cells in the layer
+    - activation   (string) : the activation function for the layer
+    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
+    
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    self.cells = cells
+    self.name = name
+
+    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+
+    # default init
+    self.initializer_fn = Key.INITIALIZER['default']
+    if activation in rectifiers:
+      self.initializer_fn = Key.INITIALIZER['he normal']
+    elif activation in normalization:
+      self.initializer_fn = Key.INITIALIZER['glorot normal']
+
+    if 'initializer' in kwargs:
+      if kwargs['initializer'].lower() not in Key.INITIALIZER:
+        raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+
+    self.input_sequence = input_sequence
+    self.output_sequence = output_sequence
+
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
+    
+    features, sequence_length = fan_in_shape
+    if self.input_sequence is None:
+      self.input_sequence = tuple([_ for _ in range(features)]) 
+      
+    if self.output_sequence is None:
+      self.output_sequence = tuple([_ for _ in range(self.cells)])
+
+    params = {}
+    for cell_index in range(self.cells):
+      params[f'cell_{cell_index}'] = {
+        # reset gate
+        "W_r": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "U_r": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "b_r": jnp.zeros(sequence_length),
+
+        # update gate
+        "W_z": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "U_z": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "b_z": jnp.zeros(sequence_length),
+
+        # candidate hidden
+        "W_h": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "U_h": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
+        "b_h": jnp.zeros(sequence_length),
+
+        # final fully-connected layer before output
+        "final_weights": self.initializer_fn((sequence_length * 2, sequence_length), features, fan_out_shape[0]),
+        "final_bias": jnp.zeros(sequence_length * 2)
+      }
+      
+    return params, (len(self.output_sequence),sequence_length)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    # inputs: (batch, seq_len, features)
+    batches, seq_len, features = inputs.shape
+    per_batch_output = []
+    per_batch_WS = []
+
+    for n in range(batches):
+      
+      h_t = jnp.zeros(features)
+      weighted_sums = []
+      outputs = []
+
+      for cell_index in range(self.cells):
+        cell_params = params[f'cell_{cell_index}']
+
+        # pick input feature
+        x_t = jnp.zeros(features)
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          x_t = inputs[n, input_feature_idx, :]
+
+        # reset gate
+        r_t = jax.nn.sigmoid(x_t * cell_params["W_r"] + h_t * cell_params["U_r"] + cell_params["b_r"])
+
+        # update gate
+        z_t = jax.nn.sigmoid(x_t * cell_params["W_z"] + h_t * cell_params["U_z"] + cell_params["b_z"])
+
+        # candidate hidden
+        h_hat = self.activation_fn(x_t * cell_params["W_h"] + (r_t * h_t) * cell_params["U_h"] + cell_params["b_h"])
+
+        # final hidden state
+        h_t = (1 - z_t) * h_t + z_t * h_hat
+
+        # fully connected before output
+        merged = jnp.concatenate((h_t, x_t)) + cell_params['final_bias']
+        output_carry = self.activation_fn(merged @ cell_params['final_weights'])
+
+        weighted_sums.append([r_t, z_t, h_hat, h_t, merged, merged @ cell_params['final_weights']])
+
+        if cell_index in self.output_sequence:
+          outputs.append(output_carry)
+
+      per_batch_output.append(outputs)
+      per_batch_WS.append(weighted_sums)
+
+    return jnp.array(per_batch_output), per_batch_WS
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    batches, seq_len, features = inputs.shape
+    grads = {k: {
+      "W_r": jnp.zeros_like(v["W_r"]), 
+      "U_r": jnp.zeros_like(v["U_r"]), 
+      "b_r": jnp.zeros_like(v["b_r"]),
+      
+      "W_z": jnp.zeros_like(v["W_z"]), 
+      "U_z": jnp.zeros_like(v["U_z"]), 
+      "b_z": jnp.zeros_like(v["b_z"]),
+      
+      "W_h": jnp.zeros_like(v["W_h"]), 
+      "U_h": jnp.zeros_like(v["U_h"]), 
+      "b_h": jnp.zeros_like(v["b_h"]),
+      
+      "final_weights": jnp.zeros_like(v["final_weights"]),
+      "final_bias":    jnp.zeros_like(v["final_bias"])
+    } for k, v in params.items()}
+
+    input_grads = jnp.zeros_like(inputs)
+
+    for n in range(batches):
+      
+      grad_h = jnp.zeros(features)
+      
+      for cell_index in reversed(range(self.cells)):
+        cell_params = params[f'cell_{cell_index}']
+        r_t, z_t, h_hat, h_t, final_input, WS = weighted_sums[n][cell_index]
+
+        # combine error + upstream
+        local_error = error[n, cell_index] + grad_h
+
+        # backprop through final fully-connected
+        grads_z = self.activation_derivative_fn(local_error, WS)
+        grads_weights = jnp.outer(final_input, grads_z)
+        grads_biases = jnp.sum(grads_z, axis=0)
+        upstream = grads_z @ cell_params['final_weights'].T
+
+        grads[f'cell_{cell_index}']["final_weights"] += grads_weights
+        grads[f'cell_{cell_index}']["final_bias"] += grads_biases
+
+        # split back to h_t and x_t contributions
+        grad_h = upstream[:features]
+        grad_x = upstream[features:]
+
+        if cell_index in self.input_sequence:
+          input_feature_idx = self.input_sequence.index(cell_index)
+          
+          # print(input_grads)
+          # print(input_grads[n, input_feature_idx, :])
+          # print(grad_x)
+          # exit()
+          
+          input_grads = input_grads.at[n, input_feature_idx, :].add(grad_x)
+
+        # TODO: properly expand into r_t, z_t, and candidate grads
+        # (same structure as GRU math but with FCs)
+
+    return input_grads, grads
+
+class Attention:
+  def __init__(self, heads:int, activation:str, name:str="Null", *args, **kwargs):
+    self.heads = heads
+    self.name = name
+
+    # validate activation
+    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+    self.activation_fn = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+
+    # initializer selection
+    self.initializer_fn = Key.INITIALIZER['default']
+    if activation in rectifiers:
+      self.initializer_fn = Key.INITIALIZER['he normal']
+    elif activation in normalization:
+      self.initializer_fn = Key.INITIALIZER['glorot normal']
+
+    if 'initializer' in kwargs:
+      if kwargs['initializer'].lower() not in Key.INITIALIZER:
+        raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
+    """
+    fan_in_shape: (features, sequence_length)
+    fan_out_shape: (features_out, sequence_length_out) - we preserve length
+    """
+    features, sequence_length = fan_in_shape
+    params = {}
+
+    # each head has its own Q, K, V
+    for head in range(self.heads):
+      params[f'head_{head}'] = {
+        "W_Q": self.initializer_fn((sequence_length, sequence_length), features, fan_out_shape[0]),
+        "W_K": self.initializer_fn((sequence_length, sequence_length), features, fan_out_shape[0]),
+        "W_V": self.initializer_fn((sequence_length, sequence_length), features, fan_out_shape[0]),
+        "b_Q": jnp.zeros(sequence_length),
+        "b_K": jnp.zeros(sequence_length),
+        "b_V": jnp.zeros(sequence_length),
+      }
+
+    # final projection after concat
+    params["final"] = {
+      "W_O": self.initializer_fn((sequence_length * self.heads, sequence_length), features, fan_out_shape[0]),
+      "b_O": jnp.zeros(sequence_length)
+    }
+
+    return params, (features, sequence_length)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    batch_size, features, seq_len = inputs.shape
+    per_batch_outputs = []
+    per_batch_WS = []
+
+    for n in range(batch_size):  # process one batch at a time
+      batch_input = inputs[n]  # (seq_len, features)
+      head_outputs = []
+      head_ws = []
+
+      for head in range(self.heads):
+        head_params = params[f'head_{head}']
+
+        # fully-connected projections
+        Q = batch_input @ head_params["W_Q"] + head_params["b_Q"]  # (S, F)
+        K = batch_input @ head_params["W_K"] + head_params["b_K"]  # (S, F)
+        V = batch_input @ head_params["W_V"] + head_params["b_V"]  # (S, F)
+
+        # scaled dot-product attention
+        attn_scores = (Q @ K.T) / jnp.sqrt(seq_len)     # (S, S)
+        attn_weights = jax.nn.softmax(attn_scores, axis=-1)  # (S, S)
+        head_out = attn_weights @ V                      # (S, F)
+
+        head_outputs.append(head_out)
+        head_ws.append((Q, K, V, attn_scores, attn_weights, head_out))
+
+      # concat all heads along feature dim → (S, F * heads)
+      concat_out = jnp.concatenate(head_outputs, axis=-1)
+      
+      # final FC projection (maps back to (S, F))
+      merged = jax.vmap(lambda token: token @ params["final"]["W_O"] + params["final"]["b_O"])(concat_out)
+      out = self.activation_fn(merged)  # (S, F)
+
+      per_batch_outputs.append(out)
+      per_batch_WS.append((head_ws, concat_out, merged, out))
+
+    return jnp.array(per_batch_outputs), per_batch_WS
+
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:dict) -> tuple[jnp.ndarray, dict]:
+    batch_size, features, seq_len = inputs.shape
+
+    # initialize grads
+    grads = {}
+    for head in range(self.heads):
+      grads[f'head_{head}'] = {
+        "W_Q": jnp.zeros_like(params[f'head_{head}']["W_Q"]),
+        "b_Q": jnp.zeros_like(params[f'head_{head}']["b_Q"]),
+        "W_K": jnp.zeros_like(params[f'head_{head}']["W_K"]),
+        "b_K": jnp.zeros_like(params[f'head_{head}']["b_K"]),
+        "W_V": jnp.zeros_like(params[f'head_{head}']["W_V"]),
+        "b_V": jnp.zeros_like(params[f'head_{head}']["b_V"]),
+      }
+
+    grads["final"] = {
+      "W_O": jnp.zeros_like(params["final"]["W_O"]),
+      "b_O": jnp.zeros_like(params["final"]["b_O"]),
+    }
+
+    input_grads = jnp.zeros_like(inputs)
+
+    # process per batch
+    for n in range(batch_size):
+      batch_input = inputs[n]    # (S, F)
+      batch_error = error[n]     # (S, F)
+      head_ws, concat_out, merged, out = weighted_sums[n]
+
+      # ---- backprop through final FC + activation ----
+      d_out = self.activation_derivative_fn(batch_error, merged)   # (S, F)
+      grads["final"]["W_O"] += jnp.einsum("bi,bj->ij", concat_out, d_out)                # (F*H, F)
+      grads["final"]["b_O"] += jnp.sum(d_out, axis=0)              # (F,)
+      d_concat = d_out @ params["final"]["W_O"].T                  # (S, F*H)
+
+      # ---- split gradient across heads ----
+      split_d = jnp.split(d_concat, self.heads, axis=-1)
+
+      # accumulate grads per-head + input grads
+      d_input_total = jnp.zeros_like(batch_input)
+
+      for head, d_head_out in enumerate(split_d):
+        Q, K, V, attn_scores, attn_weights, head_out = head_ws[head]
+        head_params = params[f'head_{head}']
+
+        # grad wrt V (from attn_weights @ V)
+        dV = attn_weights.T @ d_head_out  # (S, F)
+
+        # grad wrt attn_weights
+        d_attn_weights = d_head_out @ V.T  # (S, S)
+
+        # grad wrt attn_scores (softmax backprop)
+        # softmax jacobian simplified: dL/dS = (grad - sum(grad*W, axis=-1)) * W
+        d_attn_scores = d_attn_weights * attn_weights - attn_weights * jnp.sum(d_attn_weights * attn_weights, axis=-1, keepdims=True)
+
+        # grad wrt Q and K
+        dQ = d_attn_scores @ K / jnp.sqrt(seq_len)
+        dK = d_attn_scores.T @ Q / jnp.sqrt(seq_len)
+
+        # propagate through FCs: (batch_input @ W + b)
+        grads[f'head_{head}']["W_Q"] += batch_input.T @ dQ
+        grads[f'head_{head}']["b_Q"] += jnp.sum(dQ, axis=0)
+
+        grads[f'head_{head}']["W_K"] += batch_input.T @ dK
+        grads[f'head_{head}']["b_K"] += jnp.sum(dK, axis=0)
+
+        grads[f'head_{head}']["W_V"] += batch_input.T @ dV
+        grads[f'head_{head}']["b_V"] += jnp.sum(dV, axis=0)
+
+        # accumulate gradient wrt inputs
+        d_input_total += dQ @ head_params["W_Q"].T
+        d_input_total += dK @ head_params["W_K"].T
+        d_input_total += dV @ head_params["W_V"].T
+
+      # assign input grads for this batch
+      input_grads = input_grads.at[n].set(d_input_total)
+
+    return input_grads, grads
 
 # functional layers
 
 class MaxPooling:
-  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), **kwargs):
+  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="Null", *args, **kwargs):
     self.pool_size = pool_size
     self.strides = strides
+    self.name = name
 
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
     C, H, W = fan_in_shape
@@ -651,18 +1500,19 @@ class MaxPooling:
     return upstream_gradient, {}
 
 class MeanPooling:
-  def __init__(self, pool_size: tuple[int, int] = (2, 2), strides: tuple[int, int] = (2, 2), **kwargs):
+  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="Null", *args, **kwargs):
     self.pool_size = pool_size
     self.strides = strides
+    self.name = name
 
-  def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape: tuple[int, int]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, int]) -> tuple[dict, tuple[int, ...]]:
     C, H, W = fan_in_shape
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
     self.input_shape = fan_in_shape
     return {}, (C, pooled_H, pooled_W)
 
-  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if len(inputs.T.shape) != 4:
       inputs = jnp.expand_dims(inputs.T, axis=1)
 
@@ -678,7 +1528,7 @@ class MeanPooling:
     pooled_output /= pool_area
     return pooled_output, inputs
 
-  def backward(self, params: dict, inputs: jnp.ndarray, error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     N, C, H, W = inputs.shape
     _, _, pooled_H, pooled_W = error.shape
     pool_H, pool_W = self.pool_size
@@ -699,17 +1549,17 @@ class MeanPooling:
     return upstream_gradient, {}
 
 class Flatten:
-  def __init__(self, **kwargs):
-    pass
+  def __init__(self, name:str="Null", *args, **kwargs):
+    self.name = name
 
-  def calibrate(self, fan_in_shape: tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
     flattened_size = 1
     for dim in fan_in_shape:
       flattened_size *= dim
     self.input_shape = fan_in_shape
     return {}, (int(flattened_size),)
 
-  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # Flatten batch to (batch, features)
     flattened_output = inputs.reshape(inputs.shape[0], -1)
     return flattened_output.T, inputs  # Keep inputs for backprop
@@ -717,4 +1567,42 @@ class Flatten:
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     upstream_gradient = error.T.reshape(inputs.shape)
     return upstream_gradient, {}
+
+class Operation:
+  def __init__(self, operation:typing.Union[str, callable], operation_derivative:callable=do_nothing, name:str="Null", *args, **kwargs):
+    
+    if type(operation) == str:
+      if operation in Key.ACTIVATION:
+        self.operation_fn = Key.ACTIVATION[operation.lower()]
+        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()]
+        
+      if operation in Key.SCALER:
+        self.operation_fn = Key.ACTIVATION[operation.lower()]
+        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()]
+
+    else:
+      self.operation_fn = operation
+      
+      if not callable(operation_derivative):
+        raise TypeError("operation_derivative must be a callable function")
+      if operation_derivative is do_nothing:
+        raise ValueError("operation_derivative must be provided as a callable function")
+      
+      self.operation_derivative_fn = operation_derivative
+    
+    self.name = name
+  
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+    
+    if self.operation_fn(jnp.zeros(fan_in_shape)).shape != fan_in_shape:
+      raise SystemError(f"Operation layer '{self.name}' operation function does not preserve shape: {fan_in_shape} -> {self.operation_fn(jnp.zeros_like(fan_in_shape)).shape}")
+    
+    return {}, fan_in_shape
+  
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    return self.operation_fn(inputs), inputs  # WS is just inputs for backprop
+  
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    return self.operation_derivative_fn(error, weighted_sums), {}
+
 

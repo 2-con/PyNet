@@ -47,6 +47,7 @@ from core.flash.layers import *
 from core.vanilla.utility import do_nothing
 from system.config import *
 
+
 #######################################################################################################
 #                                               Extra                                                 #
 #######################################################################################################
@@ -382,7 +383,7 @@ class Sequential:
     #                                        Functions                                          #
     #############################################################################################
 
-    # @jit
+    @jit
     def propagate(features:jnp.ndarray, parameters:dict) -> tuple[jnp.ndarray, jnp.ndarray]:
       
       activations   = [features]
@@ -414,10 +415,10 @@ class Sequential:
         
         error, gradients = backward_func_tuple[layer_index](layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
-        if type(layer) in (Flatten, MaxPooling, MeanPooling):
+        if type(layer) in (Flatten, MaxPooling, MeanPooling, Operation):
           continue
         
-        if type(layer) == Recurrent:
+        if type(layer) in (Recurrent, LSTM, GRU):
           new_layer_params = {}
           new_opt_state = {}
 
@@ -428,12 +429,12 @@ class Sequential:
 
             for param_name, param_value in cell_params.items():
               updated_param, updated_opt_state = self.optimizer(
-                  learning_rate,
-                  param_value,
-                  cell_grads[param_name],
-                  opt_state[f'layer_{layer_index}'][cell_key][param_name],
-                  timestep=timestep,
-                  **optimizer_hyperparams
+                learning_rate,
+                param_value,
+                cell_grads[param_name],
+                opt_state[f'layer_{layer_index}'][cell_key][param_name],
+                timestep=timestep,
+                **optimizer_hyperparams
               )
               new_cell_params[param_name] = updated_param
               new_cell_opt_state[param_name] = updated_opt_state
@@ -443,9 +444,8 @@ class Sequential:
 
           parameters_pytree[f'layer_{layer_index}'] = new_layer_params
           opt_state[f'layer_{layer_index}'] = new_opt_state
-
           
-        else:
+        elif type(layer) in (Dense, Convolution, Localunit):
           layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
             learning_rate,
             layer_params['weights'],
@@ -469,6 +469,38 @@ class Sequential:
             'biases': layer_params_biases
           }
         
+        elif type(layer) == Attention:
+          new_layer_params = {}
+          new_opt_state = {}
+
+          # loop through all heads + final projection
+          for cell_key, cell_params in layer_params.items():
+            cell_grads = gradients[cell_key]
+            new_cell_params = {}
+            new_cell_opt_state = {}
+
+            for param_name, param_value in cell_params.items():
+              updated_param, updated_opt_state = self.optimizer(
+                learning_rate,
+                param_value,
+                cell_grads[param_name],
+                opt_state[f'layer_{layer_index}'][cell_key][param_name],
+                timestep=timestep,
+                **optimizer_hyperparams
+              )
+              new_cell_params[param_name] = updated_param
+              new_cell_opt_state[param_name] = updated_opt_state
+
+            new_layer_params[cell_key] = new_cell_params
+            new_opt_state[cell_key] = new_cell_opt_state
+
+          # update pytree
+          parameters_pytree[f'layer_{layer_index}'] = new_layer_params
+          opt_state[f'layer_{layer_index}'] = new_opt_state
+
+        else:
+          raise NotImplementedError(f"Backpropagation and update systems are not implemented for layer of type \"{type(layer).__name__}\"")
+        
       return parameters_pytree, opt_state
     
     #############################################################################################
@@ -485,7 +517,7 @@ class Sequential:
     timestep = 0
     
     update_step = jax.jit(step, static_argnums=(0,1)) # static argnums dosent work for JIT wrappers apparently...
-    backward_func_tuple = tuple((layer.backward) for layer in self.layers)
+    backward_func_tuple = tuple(layer.backward for layer in self.layers)
     learning_rate = jnp.float32(self.learning_rate)
     
     # test
@@ -512,31 +544,23 @@ class Sequential:
         batch_features = randomized_features[base_index : base_index + self.batchsize]
         batch_targets = randomized_targets[base_index : base_index + self.batchsize]
         
-        # no transpose
         activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
 
-        # loss works on (batch, outputs)
-        # print(batch_targets)
-        # print(activations_and_weighted_sums['activations'][-1])
-        
-        
         epoch_loss += self.loss_function(batch_targets, activations_and_weighted_sums['activations'][-1])
-
-        # error = dL/dy
         initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         timestep += 1
-        current_params, current_opt_state = step(
-            tuple(self.layers),
-            backward_func_tuple,
-            initial_error,  # no transpose
-            self.params_pytree,
-            self.opt_state,
-            activations_and_weighted_sums['activations'],
-            activations_and_weighted_sums['weighted_sums'],
-            timestep,
-            self.optimizer_hyperparams,
-            learning_rate
+        current_params, current_opt_state = update_step(
+          tuple(self.layers),
+          backward_func_tuple,
+          initial_error,  # no transpose
+          self.params_pytree,
+          self.opt_state,
+          activations_and_weighted_sums['activations'],
+          activations_and_weighted_sums['weighted_sums'],
+          timestep,
+          self.optimizer_hyperparams,
+          learning_rate
         )
 
         self.params_pytree = current_params

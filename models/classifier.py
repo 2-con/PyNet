@@ -20,9 +20,9 @@ might add adaboost at some point
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools.arraytools import shape, transpose
-from core.loss import Entropy, Gini_impurity
-from core.datafield import Node as n
-from core.datafield import Datacontainer as dc
+from core.vanilla.loss import Entropy, Gini_impurity
+from core.vanilla.datafield import Node as n
+from core.vanilla.datafield import Datacontainer as dc
 import random
 import math
 
