@@ -27,7 +27,7 @@ import random
 import math
 
 class KNN:
-  def __init__(self, ):
+  def __init__(self):
     """
     K-Nearest Neighbors
     -----
@@ -450,7 +450,8 @@ class RandomForest:
     return max(vote_count, key=vote_count.get)
 
 class NaiveBayes:
-  ...
+  def __init__(self):
+    pass
 
 class SVM:
   def __init__(self, kernel):

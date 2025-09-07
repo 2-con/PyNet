@@ -18,7 +18,7 @@ def OneHotEncoder(data:list) -> list:
   -----
   Args
   -----
-  - data (list): List of elements to be one-hot encoded.
+  - data (list) : List of elements to be one-hot encoded.
   """
   unique_elements = list(set(data))
   answer = []
@@ -37,8 +37,8 @@ def OrdinalEncoder(ranking:list, data:list) -> list:
   -----
   Args
   -----
-  - ranking (list): List of unique elements in the order of their rank, starting from 0.
-  - data (list): List of elements to be ordinal encoded.
+  - ranking (list) : List of unique elements in the order of their rank, starting from 0.
+  - data (list) : List of elements to be ordinal encoded.
   """
   ranks = {value: index for index, value in enumerate(ranking)}
   answer = []
@@ -59,8 +59,8 @@ def Binarizer(threshold:float, data) -> list:
   -----
   Args
   -----
-  - threshold (float or int): The threshold value to compare against.
-  - data (list): List of numerical elements to be binarized.
+  - threshold (float or int) : The threshold value to compare against.
+  - data (list) : List of numerical elements to be binarized.
   """
   return [1 if x > threshold else 0 for x in data]
 
@@ -73,7 +73,7 @@ def BinaryEncoder(data:list) -> list:
   -----
   Args
   -----
-  - data (list): List of numerical elements to be binarized. every element present must be an integer
+  - data (list) : List of numerical elements to be binarized. every element present must be an integer
   """
   
   return [bin(x)[2:].split() for x in data]

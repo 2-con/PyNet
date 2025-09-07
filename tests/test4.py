@@ -9,20 +9,20 @@ import time
 
 # Example Usage
 model = Sequential(
-  LSTM(3, activation="identity"),
+
 )
 
 # Compile the model
 model.compile(
-  input_shape=(3,2),
+  input_shape=(1,2,2),
   optimizer='adam',
   loss='mean squared error',
   learning_rate=0.01,
-  epochs=700,
+  epochs=100,
   metrics=['accuracy'], 
   batch_size=2,
   verbose=3,
-  logging=100
+  logging=10
 )
 
 # some dummy data for training
@@ -33,25 +33,22 @@ features = jnp.array([
   # [2,2]
   
 [[1,6],
- [2,5],
  [3,4]],
 
 [[4,3],
- [5,2],
  [6,1]],
 ], dtype=jnp.float32)
 
 targets = jnp.array([ 
-#   [2,2],
-#   [4,4],
-  
-[[2,7],
- [3,6],
- [4,5]],
+  [2,2],
+  [4,4],
 
-[[5,4],
- [6,3],
- [7,2]],
+
+# [[2,7],
+#  [4,5]],
+
+# [[5,4],
+#  [7,2]],
 ])
 
 # Fit the model

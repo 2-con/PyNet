@@ -37,8 +37,6 @@ import random
 
 import jax
 import jax.numpy as jnp
-from jax import jit, grad, tree_util
-import functools
 
 from tools import utility
 from core.flash import loss, optimizer, metric, derivative
@@ -236,7 +234,7 @@ class Sequential:
 
     self.layers.append(layer)
 
-  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list, batch_size=1, verbose=1, logging=1, **kwargs):
+  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list, validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, *args, **kwargs):
     """
     Compile
     -----
@@ -257,10 +255,13 @@ class Sequential:
     """
     self.input_shape = input_shape
     self.learning_rate = learning_rate
-    self.epochs = epochs
+    self.epochs = epochs + 1
     self.batchsize = batch_size
     self.verbose = verbose
     self.logging = logging
+    
+    self.error_logs = []
+    self.validation_error_logs = []
     
     ############################################################################################
     #                        Initialize model parameters and connections                       #
@@ -313,7 +314,7 @@ class Sequential:
     self.optimizer = Key.OPTIMIZER[optimizer]
     self.optimizer_hyperparams = {**kwargs} # Store all remaining kwargs as optimizer hyperparams
 
-    self.opt_state = tree_util.tree_map(
+    self.opt_state = jax.tree_util.tree_map(
       lambda p: Key.OPTIMIZER_INITIALIZER[optimizer](p.shape, p.dtype),
       self.params_pytree
     )
@@ -350,6 +351,15 @@ class Sequential:
     self.metrics = tuple(self.metrics)   
 
     self.is_compiled = True
+    
+    ############################################################################################
+    #                          Initialize Valdation (if applicable)                            #
+    ############################################################################################
+    
+    if 0 <= validation_split < 1:
+      self.validation_split = validation_split
+    else:
+      raise ValueError("validation_split must be between [0,1)")
 
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
@@ -379,11 +389,13 @@ class Sequential:
     if targets.ndim == 1:
       targets = targets[:, None]
 
+    print() if self.verbose >= 1 else do_nothing()
+    
     #############################################################################################
     #                                        Functions                                          #
     #############################################################################################
 
-    @jit
+    # @jax.jit
     def propagate(features:jnp.ndarray, parameters:dict) -> tuple[jnp.ndarray, jnp.ndarray]:
       
       activations   = [features]
@@ -415,10 +427,13 @@ class Sequential:
         
         error, gradients = backward_func_tuple[layer_index](layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
-        if type(layer) in (Flatten, MaxPooling, MeanPooling, Operation):
+        if type(layer) in (Flatten, MaxPooling, MeanPooling, Operation, Dropout, Reshape):
+          # this is just to skip layers that don't have parameters
+          # their backward methods will still be called above to propagate the error correctly
+          
           continue
         
-        if type(layer) in (Recurrent, LSTM, GRU):
+        if type(layer) in (Recurrent, LSTM, GRU, Attention):
           new_layer_params = {}
           new_opt_state = {}
 
@@ -445,7 +460,7 @@ class Sequential:
           parameters_pytree[f'layer_{layer_index}'] = new_layer_params
           opt_state[f'layer_{layer_index}'] = new_opt_state
           
-        elif type(layer) in (Dense, Convolution, Localunit):
+        elif type(layer) in (Dense, Convolution, Deconvolution, Localunit):
           layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
             learning_rate,
             layer_params['weights'],
@@ -469,35 +484,6 @@ class Sequential:
             'biases': layer_params_biases
           }
         
-        elif type(layer) == Attention:
-          new_layer_params = {}
-          new_opt_state = {}
-
-          # loop through all heads + final projection
-          for cell_key, cell_params in layer_params.items():
-            cell_grads = gradients[cell_key]
-            new_cell_params = {}
-            new_cell_opt_state = {}
-
-            for param_name, param_value in cell_params.items():
-              updated_param, updated_opt_state = self.optimizer(
-                learning_rate,
-                param_value,
-                cell_grads[param_name],
-                opt_state[f'layer_{layer_index}'][cell_key][param_name],
-                timestep=timestep,
-                **optimizer_hyperparams
-              )
-              new_cell_params[param_name] = updated_param
-              new_cell_opt_state[param_name] = updated_opt_state
-
-            new_layer_params[cell_key] = new_cell_params
-            new_opt_state[cell_key] = new_cell_opt_state
-
-          # update pytree
-          parameters_pytree[f'layer_{layer_index}'] = new_layer_params
-          opt_state[f'layer_{layer_index}'] = new_opt_state
-
         else:
           raise NotImplementedError(f"Backpropagation and update systems are not implemented for layer of type \"{type(layer).__name__}\"")
         
@@ -509,8 +495,11 @@ class Sequential:
     
     self.is_trained = True
 
-    features = jnp.asarray(features)
-    targets = jnp.asarray(targets)
+    features = jnp.asarray(features[0:int(len(features)*(1-self.validation_split))])
+    targets = jnp.asarray(targets[0:int(len(targets)*(1-self.validation_split))])
+    
+    validation_features = jnp.asarray(features[int(len(features)*self.validation_split):]) if self.validation_split > 0 else jnp.asarray([])
+    validation_targets = jnp.asarray(targets[int(len(targets)*self.validation_split):]) if self.validation_split > 0 else jnp.asarray([])
 
     current_params = self.params_pytree
     current_opt_state = self.opt_state
@@ -550,7 +539,7 @@ class Sequential:
         initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         timestep += 1
-        current_params, current_opt_state = update_step(
+        current_params, current_opt_state = step(
           tuple(self.layers),
           backward_func_tuple,
           initial_error,  # no transpose
@@ -565,14 +554,40 @@ class Sequential:
 
         self.params_pytree = current_params
         self.opt_state = current_opt_state
-          
+      
+      validation_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else do_nothing()
+      validation_loss = self.loss_function(validation_targets, validation_activations_and_weighted_sums['activations'][-1]) if len(validation_features) > 0 else do_nothing()
+      
+      epoch_loss /= len(features)
+      validation_loss /= len(features)
+      
+      self.error_logs.append(epoch_loss)
+      self.validation_error_logs.append(validation_loss) if len(validation_features) > 0 else do_nothing()
+      
       ############ post training
 
-      if epoch % self.logging == 0 and self.verbose == 3:
-        self.error_logs.append(epoch_loss / self.batchsize)
+      if epoch % self.logging == 0 and self.verbose >= 2:
+        prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{self.epochs-1} ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
+        pad                 = ' ' * ( len(f"Epoch {self.epochs}/{self.epochs-1} (100.0%)") - len(prefix))
+        suffix              = f" ┃ Loss: {str(epoch_loss):22}"
+        rate                = f" ┃ ROC: {str(epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0):23}"
         
-        log_str = f"Epoch {epoch+1}/{self.epochs} - Loss: {epoch_loss / self.batchsize:.4f}"
-        print(log_str)
+        if len(validation_features) > 0:
+          validation_suffix = f" ┃ Validation: {str(validation_loss):22}"
+          validation_rate   = f" ┃ VROC: {validation_loss - self.validation_error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
+        
+        else:
+          validation_suffix = f" ┃ Validation: {str('Unavailable'):12}"
+          validation_rate   = f" ┃ VROC: Unavailable"
+        
+        if self.verbose == 3:
+          print(prefix + pad + suffix)
+        elif self.verbose == 4:
+          print(prefix + pad + suffix + rate)
+        elif self.verbose == 5:
+          print(prefix + pad + suffix + rate + validation_suffix)
+        elif self.verbose == 6:
+          print(prefix + pad + suffix + rate + validation_suffix + validation_rate)
 
     self.params_pytree = current_params
 
@@ -586,6 +601,9 @@ class Sequential:
     """
     x = inputs
     for i, layer in enumerate(self.layers):
+      
+      if type(layer) is Dropout:
+        continue
       
       layer_params = self.params_pytree.get(f'layer_{i}', {})
       x, weighted_sum = layer.apply(layer_params, x)

@@ -4,12 +4,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import jax
 import jax.numpy as jnp
 import typing
+import random
 
 from system.config import *
 import core.flash.activation as activation
 import core.flash.initializer as initializer
 import core.flash.derivative as derivative
 import core.flash.scaler as scaler
+import core.flash.encoder as encoder
 from core.vanilla.utility import do_nothing
 
 class Key:
@@ -80,7 +82,14 @@ class Key:
     "min max scaler": derivative.Min_Max_Scaler_derivative,
     "max abs scaler": derivative.Max_Abs_Scaler_derivative,
     "robust scaler": derivative.Robust_Scaler_derivative,
-    "softmax": derivative.Softmax_derivative
+  }
+  
+  ENCODER = {
+    "sinusoidal positional": encoder.SinusoidalEmbedding
+  }
+  
+  ENCODER_DERIVATIVE = {
+    "sinusoidal positional": lambda x: x
   }
   
   INITIALIZER = {
@@ -94,6 +103,8 @@ class Key:
     "xavier uniform out": initializer.Xavier_uniform_out,
     "default": initializer.Default
   }
+  
+  
   
 """
 JNP shapes are determined by (Y,X) or (Z,Y,X)
@@ -128,9 +139,9 @@ class Dense:
     -----
     Args
     -----
-    - neurons     (int)     : the number of neurons in the layer
-    - activation  (string)  : the activation function
-    
+    - neurons         (int)     : the number of neurons in the layer
+    - activation      (string)  : the activation function
+    - (Optional) name (string)  : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -228,9 +239,9 @@ class Localunit:
     -----
     Args
     -----
-    - neurons     (int)     : the number of neurons in the layer
-    - activation  (string)  : the activation function
-    
+    - receptive_field (int)     : the size of the receptive field for each neuron
+    - activation      (string)  : the activation function
+    - (Optional) name (string)  : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -343,7 +354,7 @@ class Localunit:
     return upstream_gradient, param_grads
 
 class Convolution:
-  def __init__(self, kernel: tuple[int, int], channels: int, activation: str, stride: tuple[int, int] = (1, 1), name:str="Null", *args, **kwargs):
+  def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int], name:str="Null", *args, **kwargs):
     """
     Convolution
     -----
@@ -352,9 +363,11 @@ class Convolution:
     -----
     Args
     -----
-    - neurons     (int)     : the number of neurons in the layer
-    - activation  (string)  : the activation function
-    
+    - kernel          (tuple[int, int]) : the kernel dimensions to apply, automatically generated
+    - channels        (int)             : the number of channels in the kernel
+    - stride          (tuple[int, int]) : the stride to apply to the kernel
+    - activation      (string)          : the activation function
+    - (Optional) name (string)          : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -424,7 +437,7 @@ class Convolution:
       else:
         self.initializer_fn = Key.INITIALIZER["default"]
 
-  def calibrate(self, fan_in_shape: tuple[int, int, int], fan_out_shape: int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
     # fan_in_shape = (C_in, H, W)
     C_in, H, W = fan_in_shape
 
@@ -438,11 +451,10 @@ class Convolution:
     # output dims (VALID padding)
     out_H = (H - self.kernel[0]) // self.stride[0] + 1
     out_W = (W - self.kernel[1]) // self.stride[1] + 1
-    self.output_shape = (self.channels, out_H, out_W)
 
-    return self.params, self.output_shape
+    return self.params, (self.channels, out_H, out_W)
 
-  def apply(self, params: dict, inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
     inputs: (N, C_in, H, W)
     weights: (C_out, C_in, kH, kW)
@@ -464,7 +476,7 @@ class Convolution:
     activated = self.activation_function(WS)
     return activated, WS
 
-  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+  def backward(self, params:dict, inputs:jnp.ndarray, upstream_error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     if inputs.ndim != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
@@ -554,6 +566,202 @@ class Convolution:
     param_gradients = {"weights": grad_weights, "biases": grad_bias}
     return upstream_gradient, param_gradients
 
+class Deconvolution:
+  def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int], name:str="Null", *args, **kwargs):
+    """
+    Deconvolution
+    -----
+      a Deconvolution layer within the context of deep learning is actually a transposed convolution. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
+      (Image Height, Image Width, Channels).
+    -----
+    Args
+    -----
+    - kernel          (tuple[int, int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
+    - channels        (int)             : the number of channels in the kernel
+    - stride          (tuple[int, int]) : the stride to apply to the kernel
+    - activation      (string)          : the activation function
+    - (Optional) name (string)          : the name of the layer
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+    
+    Initialization
+    - Xavier uniform in
+    - Xavier uniform out
+    - He uniform
+    - Glorot uniform
+    - LeCun uniform
+    - He normal
+    - Glorot normal
+    - LeCun normal
+    - Default
+    - None
+    """
+    
+    self.kernel = kernel
+    self.channels = channels
+    self.name = name
+    self.stride = stride
+
+    if activation.lower() not in Key.ACTIVATION:
+      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
+
+    self.activation_function = Key.ACTIVATION[activation.lower()]
+    self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+
+    self.params = {}
+    self.input_shape = None
+    self.output_shape = None
+
+    if "initializer" in kwargs:
+      if kwargs["initializer"].lower() not in Key.INITIALIZER:
+        raise ValueError(
+          f"Unknown initializer: '{kwargs['initializer'].lower()}'. "
+          f"Available: {list(Key.INITIALIZER.keys())}"
+        )
+      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
+    else:
+      # He for rectifiers, Glorot for normalizers, else default
+      if self.activation_function in rectifiers:
+        self.initializer_fn = Key.INITIALIZER["he normal"]
+      elif self.activation_function in normalization:
+        self.initializer_fn = Key.INITIALIZER["glorot normal"]
+      else:
+        self.initializer_fn = Key.INITIALIZER["default"]
+
+  def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+    # fan_in_shape = (C_in, H, W)
+    C_in, H, W = fan_in_shape
+    
+    sH, sW = self.stride
+    kH, kW = self.kernel
+
+    self.params["weights"] = self.initializer_fn(
+      (self.channels, C_in, *self.kernel),
+      C_in * kH * kW,
+      fan_out_shape,
+    )
+    out_H = (H + kH) * sH - 1
+    out_W = (W + kW) * sW- 1
+
+    self.params["biases"] = jnp.zeros((self.channels, out_H, out_W))
+
+    return self.params, (self.channels, out_H, out_W)
+
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    if inputs.ndim != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
+      
+    N, C_in, H_in, W_in = inputs.shape
+    sH, sW = self.stride
+    kH, kW = self.kernel
+    
+    H_out = (H_in - 1) * sH + kH
+    W_out = (W_in - 1) * sW + kW
+    
+    upscaled = jnp.zeros((N, C_in, H_out, W_out))
+    
+    for n in range(N): # batch
+      for co in range(self.channels): # channels out
+        for i in range(H_in): # input height
+          for j in range(W_in): # input width
+            for ci in range(C_in): # channels in
+              upscaled = upscaled.at[n,co,i*sH:i*sH+kH,j*sW:j*sW+kW].add(self.params["weights"][co,ci,:,:]*inputs[n,ci,i,j])
+              
+    WS = upscaled + params["biases"]
+    activated = self.activation_function(WS)
+    return activated, WS
+
+  def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    if inputs.ndim != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
+
+    d_WS = self.activation_derivative(upstream_error, weighted_sums)  # (N, C_out, H_out, W_out)
+
+    grad_bias = jnp.sum(d_WS, axis=(0, 2, 3))  # (C_out, H_out, W_out) → reduce to (C_out,)
+
+    def correlate_deconv(inputs, errors, kernel_shape, stride):
+      N, C_in, H_in, W_in = inputs.shape
+      N_err, C_out, H_out, W_out = errors.shape
+      
+      kH, kW = kernel_shape
+      sH, sW = stride
+
+      grad_weights = jnp.zeros((C_out, C_in, kH, kW))
+
+      for n in range(N):
+        for h_in in range(H_in):
+          for w_in in range(W_in):
+            h_start = h_in * sH
+            w_start = w_in * sW
+            h_end, w_end = h_start + kH, w_start + kW
+
+            error_patch = errors[n, :, h_start:h_end, w_start:w_end]  # (C_out, kH, kW)
+            
+            for ci in range(C_in):
+              grad_weights = grad_weights.at[:, ci].add(inputs[n, ci, h_in, w_in] * error_patch)
+              
+      return grad_weights
+
+    def transposed_to_input(errors, weights, stride):
+      N, C_out, H_out, W_out = errors.shape
+      C_out_w, C_in, kH, kW = weights.shape
+      sH, sW = stride
+
+      H_in = (H_out - kH) // sH + 1
+      W_in = (W_out - kW) // sW + 1
+
+      upstream_gradient = jnp.zeros((N, C_in, H_in, W_in))
+
+      # No flip for deconv: it's already transposed
+      for n in range(N):
+        for co in range(C_out):
+          for i in range(H_in):
+            for j in range(W_in):
+              h_start, w_start = i * sH, j * sW
+              h_end, w_end = h_start + kH, w_start + kW
+
+              upstream_gradient = upstream_gradient.at[n, :, i, j].add(jnp.sum(weights[co] * errors[n, co, h_start:h_end, w_start:w_end], axis=(1, 2)))
+              
+      return upstream_gradient
+
+    grad_weights = correlate_deconv(
+      inputs=inputs,
+      errors=d_WS,
+      kernel_shape=self.kernel,
+      stride=self.stride
+    )
+
+    upstream_gradient = transposed_to_input(
+      errors=d_WS,
+      weights=params["weights"],
+      stride=self.stride
+    )
+
+    param_gradients = {"weights": grad_weights, "biases": grad_bias}
+    return upstream_gradient, param_gradients
+
 class Recurrent:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
     """
@@ -564,11 +772,11 @@ class Recurrent:
     -----
     Args
     -----
-    - Cells        (int)    : the number of cells in the layer
-    - activation   (string) : the activation function for the layer
-    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
-    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
-    
+    - Cells                       (int)           : the number of cells in the layer
+    - activation                  (string)        : the activation function for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) name             (string)        : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -743,11 +951,11 @@ class LSTM:
     -----
     Args
     -----
-    - Cells        (int)    : the number of cells in the layer
-    - activation   (string) : the activation function for the layer
-    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
-    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
-    
+    - Cells                       (int)           : the number of cells in the layer
+    - activation                  (string)        : the activation function for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) name             (string)        : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -1070,16 +1278,16 @@ class GRU:
     """
     GRU (Gated Recurrent Unit)
     -----
-      a Gated Recurrent Unit layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
+      A Gated Recurrent Unit layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
       (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
     -----
     Args
     -----
-    - Cells        (int)    : the number of cells in the layer
-    - activation   (string) : the activation function for the layer
-    - (optional) input_sequence  (tuple of int) : indices of cells that receive input from the input sequence, all cells receive input by default
-    - (optional) output_sequence (tuple of int) : indices of cells that output to the next layer, all cells output by default
-    
+    - cells                       (int)           : the number of cells in the layer
+    - activation                  (string)        : the activation function for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) name             (string)        : the name of the layer
     -----
     Activation functions
     - ReLU
@@ -1283,6 +1491,18 @@ class GRU:
 
 class Attention:
   def __init__(self, heads:int, activation:str, name:str="Null", *args, **kwargs):
+    """
+    Multiheaded Self-Attention
+    -----
+      Primary block within Transformer networks, the amount of attention heads is configurable. 
+      It accepts data with shape (batch_size, sequence_length, features) simmilar to RNNs.
+    -----
+    Args
+    -----
+    - heads           (int)     : the number of attention heads
+    - activation      (string)  : the activation function applied to the output
+    - (Optional) name (string)  : the name of the layer
+    """
     self.heads = heads
     self.name = name
 
@@ -1449,7 +1669,18 @@ class Attention:
 # functional layers
 
 class MaxPooling:
-  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="Null", *args, **kwargs):
+  def __init__(self, pool_size:tuple[int, int], strides:tuple[int, int], name:str="Null", *args, **kwargs):
+    """
+    Max Pooling
+    -----
+      A layer that performs max pooling on a 2D input while adjusting to channel dimensions. make sure to set the input shape in the format (Channels, Height, Width).
+    -----
+    Args
+    -----
+    - pool_size       (tuple of int)  : the size of the pooling window (height, width)
+    - strides         (tuple of int)  : the stride of the pooling window (height, width)
+    - (Optional) name (string)        : the name of the layer
+    """
     self.pool_size = pool_size
     self.strides = strides
     self.name = name
@@ -1459,11 +1690,12 @@ class MaxPooling:
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
     self.input_shape = fan_in_shape
+    
     return {}, (C, pooled_H, pooled_W)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    if len(inputs.T.shape) != 4:
-      inputs = jnp.expand_dims(inputs.T, axis=1)
+    if len(inputs.shape) != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
 
     pooled_output = jax.lax.reduce_window(
       inputs,
@@ -1473,11 +1705,13 @@ class MaxPooling:
       window_strides=(1, 1, *self.strides),
       padding='VALID'
     )
-    return pooled_output, inputs   # WS is just inputs here
+    
+    return pooled_output, inputs
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    # Inputs are already NCHW at this point
-    N, C, H, W = inputs.shape
+    if len(inputs.shape) != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
+      
     _, _, pooled_H, pooled_W = error.shape
 
     pool_H, pool_W = self.pool_size
@@ -1494,13 +1728,24 @@ class MaxPooling:
           mask = window == jnp.max(window)
           grad_in = grad_in.at[h_start:h_end, w_start:w_end].add(mask * grad_out[i, j])
       return grad_in
-
+    
     grad_fn = jax.vmap(jax.vmap(grad_single, in_axes=(0,0)), in_axes=(0,0))
     upstream_gradient = grad_fn(inputs, error)
     return upstream_gradient, {}
 
 class MeanPooling:
   def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="Null", *args, **kwargs):
+    """
+    Mean Pooling
+    -----
+      A layer that performs mean pooling on a 2D input while adjusting to channel dimensions. make sure to set the input shape in the format (Channels, Height, Width).
+    -----
+    Args
+    -----
+    - pool_size       (tuple of int)  : the size of the pooling window (height, width)
+    - strides         (tuple of int)  : the stride of the pooling window (height, width)
+    - (Optional) name (string)        : the name of the layer
+    """
     self.pool_size = pool_size
     self.strides = strides
     self.name = name
@@ -1513,8 +1758,8 @@ class MeanPooling:
     return {}, (C, pooled_H, pooled_W)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    if len(inputs.T.shape) != 4:
-      inputs = jnp.expand_dims(inputs.T, axis=1)
+    if len(inputs.shape) != 4:
+      inputs = jnp.expand_dims(inputs, axis=1)
 
     pooled_output = jax.lax.reduce_window(
       inputs,
@@ -1550,26 +1795,79 @@ class MeanPooling:
 
 class Flatten:
   def __init__(self, name:str="Null", *args, **kwargs):
+    """
+    Flatten
+    -----
+      A layer that flattens any ndim input into a 1D input while adjusting to batch dimensions. 
+      make sure to set the input shape in the format (Channels, Height, Width).
+    -----
+    Args
+    -----
+    - (Optional) name (string)        : the name of the layer
+    """
+    
     self.name = name
 
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
-    flattened_size = 1
-    for dim in fan_in_shape:
-      flattened_size *= dim
+    flattened_size = jnp.prod(jnp.array(fan_in_shape))
     self.input_shape = fan_in_shape
+    
     return {}, (int(flattened_size),)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # Flatten batch to (batch, features)
     flattened_output = inputs.reshape(inputs.shape[0], -1)
-    return flattened_output.T, inputs  # Keep inputs for backprop
+    
+    return flattened_output, inputs  # Keep inputs for backprop
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
-    upstream_gradient = error.T.reshape(inputs.shape)
+    upstream_gradient = error.reshape(inputs.shape)
     return upstream_gradient, {}
 
 class Operation:
   def __init__(self, operation:typing.Union[str, callable], operation_derivative:callable=do_nothing, name:str="Null", *args, **kwargs):
+    """
+    Operation
+    -----
+      A layer that performs an operation on any ndim input while preserving shape. 
+      this layer auto-adjusts and does not need to a fixed input shape, but make sure to set the input shape in the format that the operation expects.
+    -----
+    Args
+    -----
+    - operation             (str or callable) : the operation to perform on the input
+    - operation_derivative  (callable)        : the derivative of the operation if a callable is provided, make sure the backwards function has the format of FUNCTION(error, weighted_sums)
+    - (Optional) name       (string)          : the name of the layer
+    -----
+    Activation functions
+    - ReLU
+    - Softplus
+    - Mish
+    - Swish
+    - Leaky ReLU
+    - GELU
+    - ReEU
+    - None
+    - ReTanh
+
+    Normalization functions
+    - Softmax
+    - Binary Step
+    - Softsign
+    - Sigmoid
+    - Tanh
+    
+    Parametric functions
+    - ELU
+    - SELU
+    - PReLU
+    - SiLU
+
+    Scaler functions
+    - Standard Scaler
+    - Min Max Scaler
+    - Max Abs Scaler
+    - Robust Scaler
+    """
     
     if type(operation) == str:
       if operation in Key.ACTIVATION:
@@ -1577,8 +1875,12 @@ class Operation:
         self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()]
         
       if operation in Key.SCALER:
-        self.operation_fn = Key.ACTIVATION[operation.lower()]
-        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()]
+        self.operation_fn = Key.SCALER[operation.lower()]
+        self.operation_derivative_fn = Key.SCALER_DERIVATIVE[operation.lower()]
+        
+      if operation in Key.ENCODER:
+        self.operation_fn = Key.ENCODER[operation.lower()]
+        self.operation_derivative_fn = Key.ENCODER_DERIVATIVE[operation.lower()]
 
     else:
       self.operation_fn = operation
@@ -1605,4 +1907,63 @@ class Operation:
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     return self.operation_derivative_fn(error, weighted_sums), {}
 
+class Dropout:
+  def __init__(self, rate:float, mode:str, name:str="Null", *args, **kwargs):
+    if not (0.0 <= rate < 1.0):
+      raise ValueError("Dropout rate must be in the range [0.0, 1.0)")
+    if mode.lower() not in ('random', 'fixed'):
+      raise ValueError("Dropout mode must be 'random' or 'fixed'")
+    
+    self.mode = mode.lower() 
+    self.rate = rate
+    self.name = name
+  
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+    return {}, fan_in_shape
+  
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    if self.rate == 0.0:
+      return inputs, jnp.ones_like(inputs)
+    
+    if self.mode == 'random':
+      mask = jax.random.bernoulli(jax.random.PRNGKey(random.randint(1,1000)), p=1.0 - self.rate, shape=inputs.shape)
 
+    else:
+      drop_rate = int(jnp.ones((inputs.shape)).flatten().shape[0] * self.rate)
+      ones = jnp.ones((inputs.shape)).flatten()[0:drop_rate]
+      zeros = jnp.zeros((inputs.shape)).flatten()[drop_rate:]
+
+      mask = jax.random.permutation(jax.random.PRNGKey(random.randint(1,1000)), jnp.concatenate((ones, zeros))).reshape(inputs.shape)
+
+    return inputs * mask, mask
+  
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    if self.rate == 0.0:
+      return error, {}
+    
+    return error * weighted_sums / (1.0 - self.rate), {}
+
+class Reshape:
+  def __init__(self, target_shape:tuple[int, ...], name:str="Null", *args, **kwargs):
+    self.target_shape = target_shape
+    self.name = name
+  
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+    input_size = jnp.prod(jnp.array(fan_in_shape[1:]))  # exclude batch dimension
+    target_size = jnp.prod(jnp.array(self.target_shape))
+    
+    if input_size != target_size:
+      raise ValueError(f"Reshape layer '{self.name}' cannot reshape from {fan_in_shape} to {self.target_shape} due to size mismatch ({input_size} -> {target_size})")
+    
+    return {}, self.target_shape
+  
+  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    batch_size = inputs.shape[0]
+    reshaped_output = inputs.reshape((batch_size, *self.target_shape))
+    
+    return reshaped_output, inputs  # WS is just inputs for backprop
+  
+  def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
+    upstream_gradient = error.reshape(inputs.shape)
+    return upstream_gradient, {}
+  
