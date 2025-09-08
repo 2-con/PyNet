@@ -2,11 +2,97 @@
   <img width="1047" height="226" alt="Screenshot 2025-08-14 211650" src="https://github.com/user-attachments/assets/bae68280-f298-4578-82c5-6a12700adee3" />
 </p>
 
-# PyNet
 
-A free and open framework for AI & Machine Learning
+<div style="border: 2px solid #ffffffff; border-radius: 100px;">
+</div>
 
-PyNet is a free and open-source, Python-based framework designed to demystify machine learning and AI. Unlike complex libraries like TensorFlow or PyTorch, PyNet focuses on small-scale educational projects and experiments. It provides full access to the source code, lowering the barrier to entry for enthusiasts.
+
+<div style="border: 2px solid #ffffffff; border-radius: 15px; margin: 20px; padding: 0px 20px 0px 20px;">
+  <p align="center" style="font-size:70px">
+    <b>
+      PyNet
+    </b>
+  </p>
+
+  <p align="center" style="font-size:30px; padding: 0px 0px 20px 0px;">
+    <i>
+      A free and open framework for AI & Machine Learning
+    </i>
+  </p>  
+</div>
+
+
+<div style="border: 2px solid #ffffffff; border-radius: 15px; margin: 20px; padding: 0px 20px 0px 20px;">
+  <p align="center" style="font-size:40px">
+    <b>
+      Table of Contents
+    </b>
+
+  <p align="center" style="font-size:20px">
+    ❓ What is PyNet ❓
+  </p>
+
+  <p align="center" style="font-size:20px">
+    🚀 Getting Started 🚀
+  </p>
+
+  <p align="center" style="font-size:20px">
+    ⚡ Core Features ⚡
+  </p>
+
+  <p align="center" style="font-size:20px">
+    ⚒️ Additional Features ⚒️
+  </p>
+
+  <p align="center" style="font-size:20px">
+    📚 Documentation 📚
+  </p>
+
+  <p align="center" style="font-size:20px">
+    📲 Installation 📲
+  </p>
+
+  <p align="center" style="font-size:20px">
+    ⚖️ Licence ⚖️
+  </p>
+
+  <p align="center" style="font-size:20px">
+    🤝 Contributors 🤝
+  </p>
+
+</div>
+
+
+<div style="border: 2px solid #ffffffff; border-radius: 15px; margin: 20px; padding: 0px 20px 0px 20px;">
+  <p align="center" style="font-size:40px">
+    <b>
+      What is Pynet
+    </b>
+
+  <p align="center" style="font-size:20px">
+    PyNet is a free and open-source software framework for machine learning and artificial intelligence. Unlike professional-grade libraries, PyNet focuses on small-scale educational projects and experiments by providing multiple APIs and spaces for testing, experimenting, and debugging model architectures. PyNet also allows full access to the source code, lowering the barrier to entry for enthusiasts.
+  </p>
+
+  <p align="center" style="font-size:20px">
+    PyNet features distinct APIs and a suite of tools that cater to different needs that allows users to explore core ML concepts from the ground up in multiple programming paradigms. Users can directly modify and test new ideas by injecting code directly into the framework itself to allow for greater control, PyNet is client-based so modified code only affect the local file and nothing else.
+  </p>
+
+  <p align="center" style="font-size:20px">
+    PyNet is commited to democratizing and opening up machine learning and artificial intelligence to the world, so from the newest student to the most experienced scientist, we are determined to share a new technological revolution is in the horizon.
+  </p>
+</div>
+
+
+<div style="border: 2px solid #ffffffff; border-radius: 15px; margin: 20px; padding: 0px 20px 0px 20px;">
+  <p align="center" style="font-size:40px">
+    <b>
+      TITLE
+    </b>
+
+  <p align="center" style="font-size:20px">
+    TEXT
+
+</div>
 
 ## Core APIs
 
@@ -120,10 +206,4 @@ Maintainer
 
 Contributors
 - None
-
-# Development status
-
-PyNet is almost completed, just some additional features and fixing and it should be **mostly** completed by August.
-
-estimated date: August 2025 (uncertian + not guarenteed)
 
