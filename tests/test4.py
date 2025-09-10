@@ -9,37 +9,43 @@ import time
 
 # Example Usage
 model = Sequential(
-
+  Dense(10, 'elu'),
+  Dense(6, 'elu'),
+  Dense(4, 'elu'),
 )
 
 # Compile the model
 model.compile(
-  input_shape=(1,2,2),
-  optimizer='adam',
+  input_shape=(10,),
+  optimizer='rprop',
   loss='mean squared error',
   learning_rate=0.01,
   epochs=100,
   metrics=['accuracy'], 
   batch_size=2,
   verbose=3,
-  logging=10
+  logging=1
 )
 
 # some dummy data for training
-features = jnp.array([ 
+features = jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,10))
+
+jnp.array([ 
   # [1,1,1],
   # [2,2,2],
   # [1,1],
   # [2,2]
   
-[[1,6],
- [3,4]],
+# [[1,6],
+#  [3,4]],
 
-[[4,3],
- [6,1]],
+# [[4,3],
+#  [6,1]],
 ], dtype=jnp.float32)
 
-targets = jnp.array([ 
+targets = jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,4))
+
+jnp.array([ 
   [2,2],
   [4,4],
 
@@ -59,5 +65,3 @@ model.fit(features, targets)
 print(f"""
       Finished training in {time.perf_counter() - start} seconds
       """)
-
-array_display(model.push(features).tolist())

@@ -44,7 +44,8 @@ from core.flash.layers import *
 
 from core.vanilla.utility import do_nothing
 from system.config import *
-
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 #######################################################################################################
 #                                               Extra                                                 #
@@ -395,7 +396,7 @@ class Sequential:
     #                                        Functions                                          #
     #############################################################################################
 
-    # @jax.jit
+    @jax.jit
     def propagate(features:jnp.ndarray, parameters:dict) -> tuple[jnp.ndarray, jnp.ndarray]:
       
       activations   = [features]
@@ -513,6 +514,29 @@ class Sequential:
     
     self.loss_derivative = lambda true, pred: (pred - true)
     
+    fig, ax = plt.subplots()
+    x_data, y_data = range(len(self.error_logs)), self.error_logs
+    
+    line, = ax.plot([], [], color='blue', label='Training Loss')
+    
+    # ax.plot(x_data, self.validation_error_logs, color='red', label='Validation Loss')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.set_title('Loss Curve')
+    ax.set_xlim(0, 100) # Set initial limits
+    ax.set_ylim(0, 1)
+    
+    def update(frame):
+      x_data = range(len(self.error_logs))
+      y_data = self.error_logs
+      
+      line.set_data(x_data, y_data)
+      
+      ax.set_xlim(min(x_data)-1, max(x_data)+1)
+      ax.set_ylim(min(y_data)-1, max(y_data)+1)
+      
+      return line,
+    
     #############################################################################################
     #                                           Main                                            #
     #############################################################################################
@@ -539,7 +563,7 @@ class Sequential:
         initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         timestep += 1
-        current_params, current_opt_state = step(
+        current_params, current_opt_state = update_step(
           tuple(self.layers),
           backward_func_tuple,
           initial_error,  # no transpose
@@ -565,8 +589,25 @@ class Sequential:
       self.validation_error_logs.append(validation_loss) if len(validation_features) > 0 else do_nothing()
       
       ############ post training
+      
+      x_data = range(len(self.error_logs))
+      y_data_train = self.error_logs
+      y_data_val = self.validation_error_logs
+
+      line.set_data(x_data, y_data_train)
+      
+      # Dynamically adjust the axes limits
+      if len(x_data) > 0:
+        ax.set_xlim(0, len(x_data) + 1)
+        ax.set_ylim(min(y_data_train) - 0.1, max(y_data_train) + 0.1)
+
+      # Draw the updated plot without blocking the loop
+      plt.draw()
+      plt.pause(0.01) # Pause for 10ms to allow the plot to update and be rendered
+      
 
       if epoch % self.logging == 0 and self.verbose >= 2:
+        
         prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{self.epochs-1} ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
         pad                 = ' ' * ( len(f"Epoch {self.epochs}/{self.epochs-1} (100.0%)") - len(prefix))
         suffix              = f" ┃ Loss: {str(epoch_loss):22}"
@@ -590,6 +631,10 @@ class Sequential:
           print(prefix + pad + suffix + rate + validation_suffix + validation_rate)
 
     self.params_pytree = current_params
+    
+    # anim = FuncAnimation(fig, update,frames=self.epochs, interval=1000, blit=True)
+    plt.show()
+
 
   def evaluate(self, features, targets, **kwargs) -> None:
     raise NotImplementedError("The evaluate method is not implemented in NetFlash. Please use the push method to get predictions.")
