@@ -249,10 +249,10 @@ class Sequential:
     - learning_rate (float)           : learning rate to use
     - epochs        (int)             : number of epochs to train for
     - metrics       (list)            : metrics to use
-    - batch_size    (int)             : batch size to use
-    - verbose       (int)             : verbosity level
-    - logging       (int)             : logging level
-
+    - (Optional) batch_size    (int)  : batch size to use
+    - (Optional) verbose       (int)  : verbosity level
+    - (Optional) logging       (int)  : logging level
+    - (Optional) callbacks     (list) : logging level
     """
     self.input_shape = input_shape
     self.learning_rate = learning_rate
@@ -313,7 +313,7 @@ class Sequential:
       raise ValueError(f"Optimizer '{optimizer}' not supported.")
     
     self.optimizer = Key.OPTIMIZER[optimizer]
-    self.optimizer_hyperparams = {**kwargs} # Store all remaining kwargs as optimizer hyperparams
+    self.optimizer_hyperparams = {} # Store all remaining kwargs as optimizer hyperparams
 
     self.opt_state = jax.tree_util.tree_map(
       lambda p: Key.OPTIMIZER_INITIALIZER[optimizer](p.shape, p.dtype),
@@ -329,6 +329,7 @@ class Sequential:
     
     self.loss_derivative = jax.jit(Key.LOSS_DERIVATIVE[loss.lower()])
     self.loss_function = jax.jit(Key.LOSS[loss.lower()])
+    self.loss_derivative = jax.jit(Key.LOSS_DERIVATIVE[loss.lower()])
     
     ############################################################################################
     #                                 Initialize metrics                                       #
@@ -361,13 +362,21 @@ class Sequential:
       self.validation_split = validation_split
     else:
       raise ValueError("validation_split must be between [0,1)")
-
+    
+    ############################################################################################
+    #                                        Callbacks                                         #
+    ############################################################################################
+    
+    self.callback = kwargs.get('callback', [])
+    
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
-    Args
+    Fit
     -----
       Trains the model on the given data. Ideally, the data given should be of JNP format, but any mismatching
       data types will be converted to JNP arrays.
+    -----
+    Args
     -----
     - features (JNP array) : the features to use
     - targets  (JNP array) : the corresponding targets to use
@@ -510,32 +519,10 @@ class Sequential:
     backward_func_tuple = tuple(layer.backward for layer in self.layers)
     learning_rate = jnp.float32(self.learning_rate)
     
-    # test
+    # self.loss_derivative = lambda y_true, y_pred: y_true - y_pred
     
-    self.loss_derivative = lambda true, pred: (pred - true)
-    
-    fig, ax = plt.subplots()
-    x_data, y_data = range(len(self.error_logs)), self.error_logs
-    
-    line, = ax.plot([], [], color='blue', label='Training Loss')
-    
-    # ax.plot(x_data, self.validation_error_logs, color='red', label='Validation Loss')
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Loss')
-    ax.set_title('Loss Curve')
-    ax.set_xlim(0, 100) # Set initial limits
-    ax.set_ylim(0, 1)
-    
-    def update(frame):
-      x_data = range(len(self.error_logs))
-      y_data = self.error_logs
-      
-      line.set_data(x_data, y_data)
-      
-      ax.set_xlim(min(x_data)-1, max(x_data)+1)
-      ax.set_ylim(min(y_data)-1, max(y_data)+1)
-      
-      return line,
+    callback = self.callback()
+    callback.initialization(**locals())
     
     #############################################################################################
     #                                           Main                                            #
@@ -543,6 +530,7 @@ class Sequential:
     
     for epoch in (utility.progress_bar(range(self.epochs), "> Training", "Complete", decimals=2, length=100, empty=' ') if self.verbose == 1 else range(self.epochs)):
 
+      callback.before_epoch(**locals())
       epoch_loss = 0.0
 
       for base_index in range(0, len(features), self.batchsize):
@@ -562,6 +550,8 @@ class Sequential:
         epoch_loss += self.loss_function(batch_targets, activations_and_weighted_sums['activations'][-1])
         initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
 
+        callback.before_update(**locals())
+        
         timestep += 1
         current_params, current_opt_state = update_step(
           tuple(self.layers),
@@ -576,6 +566,7 @@ class Sequential:
           learning_rate
         )
 
+        callback.after_update(**locals())
         self.params_pytree = current_params
         self.opt_state = current_opt_state
       
@@ -590,21 +581,7 @@ class Sequential:
       
       ############ post training
       
-      x_data = range(len(self.error_logs))
-      y_data_train = self.error_logs
-      y_data_val = self.validation_error_logs
-
-      line.set_data(x_data, y_data_train)
-      
-      # Dynamically adjust the axes limits
-      if len(x_data) > 0:
-        ax.set_xlim(0, len(x_data) + 1)
-        ax.set_ylim(min(y_data_train) - 0.1, max(y_data_train) + 0.1)
-
-      # Draw the updated plot without blocking the loop
-      plt.draw()
-      plt.pause(0.01) # Pause for 10ms to allow the plot to update and be rendered
-      
+      callback.after_epoch(**locals())
 
       if epoch % self.logging == 0 and self.verbose >= 2:
         
@@ -632,9 +609,7 @@ class Sequential:
 
     self.params_pytree = current_params
     
-    # anim = FuncAnimation(fig, update,frames=self.epochs, interval=1000, blit=True)
-    plt.show()
-
+    callback.end(**locals())
 
   def evaluate(self, features, targets, **kwargs) -> None:
     raise NotImplementedError("The evaluate method is not implemented in NetFlash. Please use the push method to get predictions.")
