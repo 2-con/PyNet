@@ -18,7 +18,6 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.vanilla.activation import Sigmoid
-import core.vanilla.optimizer as Optimizer
 import tools.utility as utility
 from api.netcore import Key
 import random, numpy as np, math, itertools

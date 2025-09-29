@@ -1,10 +1,3 @@
-"""
-Utility
-=====
-  Utility functions that might be useful to have, functions here typically relate to the internal workings
-  of the APIs, or are in some way critical in how the APIs work. Functions with a more spesific field of application
-  are stored in their respective modules.
-"""
 import sys, os
 
 def split(data, second_size):

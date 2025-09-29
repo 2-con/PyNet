@@ -293,7 +293,7 @@ def display_boundary(model, features:list, targets:list, *args, **kwargs) -> Non
   cmap = kwargs.get('cmap', plt.cm.RdBu)
   title = kwargs.get('title', '')
   alpha = kwargs.get('transparency', 0.5)
-  n_points = kwargs.get('n_points', 200)
+  n_points = kwargs.get('n_points', 300)
   zoom = kwargs.get('zoom', 1)
   
   ax=None
@@ -306,7 +306,7 @@ def display_boundary(model, features:list, targets:list, *args, **kwargs) -> Non
   # plotting
   
   if ax is None:
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=(9, 9))
 
   x_min, x_max = X_np[:, 0].min() - zoom, X_np[:, 0].max() + zoom
   y_min, y_max = X_np[:, 1].min() - zoom, X_np[:, 1].max() + zoom

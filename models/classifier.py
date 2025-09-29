@@ -23,6 +23,7 @@ from tools.arraytools import shape, transpose
 from core.vanilla.loss import Entropy, Gini_impurity
 from core.vanilla.datafield import Node as n
 from core.vanilla.datafield import Datacontainer as dc
+from api.netcore import Key
 import random
 import math
 
@@ -75,7 +76,7 @@ class KNN:
       elif len(shape(point)) != 1: # ensures feature and point are vectors (multidimentional points)
         raise SystemError(f"point must be a vector (list of intigers or floats)")
       
-      else: # calculate the manhattan distance between the point and the feature
+      else: # calculate the L1 distance between the point and the feature
         
         distances.append( sum(abs(a - b) for a, b in zip(feature, point)) )
         
@@ -454,22 +455,19 @@ class NaiveBayes:
     pass
 
 class SVM:
-  def __init__(self, kernel):
+  def __init__(self):
     """
     Support Vector Machine
     -----
-      Predicts the class of a point based on a support vector machine.
-    -----
-    Args
-    -----
-    - kernel (str) : the kernel to use
-    
-    Kernels
-    - linear
+      Predicts the class of a point based on a boundary. Note that this is a simple implimentation and does not use the kernel trick
+      for complex data transformations.
     """
-    self.kernel = kernel
+    self.alphas = []               # The misclassification count for each point
+    self.b = 0
+    self.is_compiled = False
+    self.is_trained = False
   
-  def compile(self, C):
+  def compile(self, maximum_iterations:int, learning_rate:float, kernel:str, C:float, **kwargs):
     """
     Compile
     -----
@@ -477,9 +475,19 @@ class SVM:
     -----
     Args:
     -----
-    - C (float) : the regularization parameter
+    - maximum_iterations  (int)     : the maximum number of iterations to train the model for to prevent infinite loops
+    - learning_rate       (float)   : the learning rate to use when training the model
+    - optimizer           (String)  : the optimizer to use
+    - kernel              (String)  : kernel, defaults to the linear kernel
     """
-    self.C = C
+    self.kernel = kernel  # e.g., x_squared_kernel
+    self.learning_rate = learning_rate
+    self.b = 0
+    self.max_iter = maximum_iterations
+    self.classes = set()
+    self.is_compiled = True
+    self.c = C # regularization parameter
+    self.l2lambda = kwargs.get('l2lambda', 0.01) # L2 regularization parameter
     
   def fit(self, features:list, labels:list):
     """
@@ -493,23 +501,76 @@ class SVM:
     - labels   (list) : the labels of the dataset, must be a 1D array
     """
     
-    # check the data
+    if not self.is_compiled:
+      raise SystemError("Model must be compiled before fitting")
+    
+    # check and normalize data
     if len(shape(features)) != 2:
       raise TypeError(f"Features must be a 2D array, got {shape(features)}")
     if len(shape(labels)) != 1:
       raise TypeError(f"Labels must be a 1D array, got {shape(labels)}")
     
-    # training the SVM
-    ...
+    self.classes = set(labels)
+    if len(self.classes) != 2:
+      raise ValueError(f"SVM only supports binary classification, got {len(self.classes)} classes")
+    self.labels = [1 if x == list(self.classes)[0] else -1 for x in labels] # convert to 1 and -1
+    self.features = features
     
-    def predict(self, point:list):
-      """
-      Predict
-      -----
-        Predicts the class of a point, the model must be compiled before using this method.
-      -----
-      Args:
-      -----
-      - point (list) : the point to predict, a vector (list of intigers or floats)
-      """
-      ...
+    self.alphas = [0] * len(features)
+    self.b = 0
+    
+    for _ in range(self.max_iter):
+      errors = 0
+      
+      # L2 decay step
+      self.alphas = [max(alpha - self.learning_rate * self.l2lambda * alpha, 0) for alpha in self.alphas]
+      
+      for i in range(len(features)):
+        x_i = features[i]
+        y_i = self.labels[i]
+        score = 0
+        
+        # Iterate over all points
+        for alpha, x_j, y_j in zip(self.alphas, self.features, self.labels):
+          if alpha > 0:
+            kernel_output = self.kernel(x_i, x_j)
+            score += alpha * y_j * kernel_output
+                
+        score += self.b # final score with bias
+        
+        if y_i * score <= 1: # 2. check for misclassification
+          errors += 1
+          
+          self.alphas[i] += self.learning_rate # Dual Update Rule
+          self.b += y_i * self.learning_rate # Update bias
+          
+          self.alphas = [min(alpha, self.c) for alpha in self.alphas] # clip alphas to C
+            
+      if errors == 0:
+        break
+      
+    self.is_trained = True
+    
+  def predict(self, point:list):
+    """
+    Predict
+    -----
+      Predicts the class of a point, the model must be compiled before using this method.
+    -----
+    Args:
+    -----
+    - point (list) : the point to predict, a vector (list of intigers or floats)
+    """
+    if not self.is_compiled:
+      raise SystemError("Model must be compiled before predicting anything")
+    if not self.is_trained:
+      raise SystemError("Model must be trained before predicting anything")
+    
+    score = 0
+    # Iterate over all points
+    for alpha, x_j, y_j in zip(self.alphas, self.features, self.labels):
+
+      kernel_output = self.kernel(x_j, point)
+      score += alpha * y_j * kernel_output
+            
+    return list(self.classes)[0] if score + self.b > 0 else list(self.classes)[1]

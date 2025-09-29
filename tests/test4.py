@@ -27,7 +27,7 @@ class RealTimePlotter(Callback):
     callbackself.fig, callbackself.ax = plt.subplots()
     callbackself.ax.set_xlabel('Epoch')
     callbackself.ax.set_ylabel('Loss')
-    # callbackself.ax.set_yscale('log')
+    callbackself.ax.set_yscale('log')
     callbackself.ax.grid(True)
     
     # Create line objects for training and validation loss
@@ -69,10 +69,10 @@ model.compile(
 )
 
 # some dummy data for training
-features = jnp.array([[0,0],[0,1],[1,0],[1,1]])
-jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,10))
-targets = jnp.array([[0],[1],[1],[0]])
-jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,4))
+features = jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,10))
+targets = jax.random.uniform(key=jax.random.key(random.randint(1,1000)), minval=0, maxval=10, shape=(20,4))
+# jnp.array([[0,0],[0,1],[1,0],[1,1]])
+# jnp.array([[0],[1],[1],[0]])
 
 # Fit the model
 start = time.perf_counter()
