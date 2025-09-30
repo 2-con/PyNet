@@ -351,7 +351,7 @@ class RandomForest:
     -----
       Fits the model to the data, building the decision tree.
     -----
-    Args:
+    Args
     -----
     - features (list) : the features of the dataset, must be an array of coordinates (2D array)
     - labels   (list) : the labels of the dataset, must be an array of classes, it can be of any type
@@ -462,31 +462,33 @@ class SVM:
       Predicts the class of a point based on a boundary. Note that this is a simple implimentation and does not use the kernel trick
       for complex data transformations.
     """
-    self.alphas = []               # The misclassification count for each point
+    self.alphas = []
     self.b = 0
     self.is_compiled = False
     self.is_trained = False
   
-  def compile(self, maximum_iterations:int, learning_rate:float, kernel:str, C:float, **kwargs):
+  def compile(self, kernel:str, maximum_iterations:int, learning_rate:float|int, *args, **kwargs):
     """
     Compile
     -----
       Compiles the model to be ready for training.
     -----
-    Args:
+    Args
     -----
+    - kernel              (core.vanilla.kernel object) : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
     - maximum_iterations  (int)     : the maximum number of iterations to train the model for to prevent infinite loops
     - learning_rate       (float)   : the learning rate to use when training the model
     - optimizer           (String)  : the optimizer to use
-    - kernel              (String)  : kernel, defaults to the linear kernel
+    - (Optional) c        (float)   : the regularization parameter
+    - (Optional) l2lambda (float)   : the L2 regularization parameter
     """
-    self.kernel = kernel  # e.g., x_squared_kernel
+    self.kernel = kernel
     self.learning_rate = learning_rate
     self.b = 0
     self.max_iter = maximum_iterations
     self.classes = set()
     self.is_compiled = True
-    self.c = C # regularization parameter
+    self.c = kwargs.get('c', 1E+10) # regularization parameter
     self.l2lambda = kwargs.get('l2lambda', 0.01) # L2 regularization parameter
     
   def fit(self, features:list, labels:list):
@@ -523,7 +525,7 @@ class SVM:
       errors = 0
       
       # L2 decay step
-      self.alphas = [max(alpha - self.learning_rate * self.l2lambda * alpha, 0) for alpha in self.alphas]
+      self.alphas = [max(alpha * ( 1 - self.learning_rate * self.l2lambda), 0) for alpha in self.alphas]
       
       for i in range(len(features)):
         x_i = features[i]
@@ -557,7 +559,7 @@ class SVM:
     -----
       Predicts the class of a point, the model must be compiled before using this method.
     -----
-    Args:
+    Args
     -----
     - point (list) : the point to predict, a vector (list of intigers or floats)
     """

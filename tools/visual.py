@@ -306,7 +306,7 @@ def display_boundary(model, features:list, targets:list, *args, **kwargs) -> Non
   # plotting
   
   if ax is None:
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(7, 7))
 
   x_min, x_max = X_np[:, 0].min() - zoom, X_np[:, 0].max() + zoom
   y_min, y_max = X_np[:, 1].min() - zoom, X_np[:, 1].max() + zoom
