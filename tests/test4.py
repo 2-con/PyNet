@@ -11,9 +11,9 @@ from core.flash.callback import Callback
 
 # Example Usage
 model = Sequential(
-  Dense(10, 'elu'),
-  Dense(6, 'elu'),
-  Dense(1, 'elu'),
+  Dense(10, 'identity'),
+  Dense(6, 'prelu'),
+  Dense(4, 'prelu'),
 )
 
 class RealTimePlotter(Callback):
@@ -32,18 +32,21 @@ class RealTimePlotter(Callback):
     
     # Create line objects for training and validation loss
     callbackself.lines['train'], = callbackself.ax.plot([], [])
+    callbackself.lines['validation'], = callbackself.ax.plot([], [])
       
   def after_epoch(callbackself, *args, **kwargs):
         
     x_data = list(range(kwargs.get('epoch', 0) + 1))
     y_data_train = kwargs.get('self', None).error_logs
+    y_data_validation = kwargs.get('self', None).validation_error_logs
     
     callbackself.lines['train'].set_data(x_data, y_data_train)
+    callbackself.lines['validation'].set_data(x_data, y_data_validation)
     
     # Dynamically adjust plot limits
     callbackself.ax.set_xlim(0, max(x_data) + 1 if x_data else 1)
     
-    callbackself.ax.set_ylim(min(y_data_train) - 0.1, max(y_data_train) + 0.1)
+    callbackself.ax.set_ylim(min(min(y_data_train), min(y_data_validation)) - 0.1, max(max(y_data_train), max(y_data_validation)) + 0.1)
     
     # Draw and flush events to update the plot
     callbackself.fig.canvas.draw()
@@ -53,18 +56,18 @@ class RealTimePlotter(Callback):
     plt.ioff()
     plt.show()
 
-
 # Compile the model
 model.compile(
-  input_shape=(2,),
+  input_shape=(10,),
   optimizer='adam',
   loss='mean squared error',
   learning_rate=0.001,
   epochs=1000,
   metrics=['accuracy'], 
   batch_size=1,
-  verbose=4,
+  verbose=6,
   logging=1,
+  validation_split=0.3,
   callback = RealTimePlotter,
 )
 

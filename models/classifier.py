@@ -23,7 +23,6 @@ from tools.arraytools import shape, transpose
 from core.vanilla.loss import Entropy, Gini_impurity
 from core.vanilla.datafield import Node as n
 from core.vanilla.datafield import Datacontainer as dc
-from api.netcore import Key
 import random
 import math
 
@@ -36,7 +35,7 @@ class KNN:
     """
     self.is_compiled = False
     
-  def compile(self, features, labels, neighbors):
+  def compile(self, neighbors):
     """
     Compile
     -----
@@ -44,12 +43,22 @@ class KNN:
     -----
     Args
     -----
-    - features (list) : the features of the dataset, must be a 2D array
-    - labels   (list) : the labels of the dataset, must be a 2D array
     - neighbors (int) : the number of neighbors to consider before classifying
     """
     self.is_compiled = True
     self.neighbors = neighbors
+    
+  def fit(self, features, labels):
+    """
+    Fit
+    -----
+      Fits the model to the training data. But since KNN does not have a training phase, this method stores the training data
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    """
     self.features = features
     self.labels = labels
     
@@ -220,14 +229,14 @@ class DecisionTree:
             
             # get the classes of the points that pass and fail the threshold
             passed_data_left = [x.c for x in leaf.data if x.data[feature_index] > threshold]
-            passed_data_right = [x.c for x in leaf.data if x.data[feature_index] < threshold]
+            passed_data_right = [x.c for x in leaf.data if x.data[feature_index] <= threshold]
             
             # if theres enough data to consider a split
             if len(passed_data_left) > 0:
               
               new_impurity_left = purity(passed_data_left)
               new_impurity_right = purity(passed_data_right)
-              new_impurity = ((len(passed_data_left) / len(leaf.data)) * new_impurity_left + (len(passed_data_right) / len(leaf.data)) * new_impurity_right)
+              new_impurity = (len(passed_data_left) / len(leaf.data)) * new_impurity_left + (len(passed_data_right) / len(leaf.data)) * new_impurity_right
               
               # min value algorithm
               if new_impurity < impurity:
@@ -299,7 +308,7 @@ class RandomForest:
     self.is_compiled = False
     self.is_trained = False
   
-  def compile(self, n_estimators:int, depth:int, loss:str, split:int, **kwargs):
+  def compile(self, n_estimators:int, depth:int, loss:str, split:int=0, **kwargs):
     """
     Compile
     -----
@@ -452,7 +461,88 @@ class RandomForest:
 
 class NaiveBayes:
   def __init__(self):
-    pass
+    """
+    Naive Bayes
+    -----
+      Predicts the class of a point based using bayes' theorem assuming the data is independent of each other, hence the name, 'Naive Bayes'.
+    """
+    self.is_compiled = False
+    self.is_trained = False
+
+  def compile(self, model_type:str, **kwargs):
+    """
+    Compile
+    -----
+      Compiles the model, model type must be 'Gaussian' for continous data, 'Multinomial' for discrete data or 'Bernoulli' for binary data
+    -----
+    Args
+    -----
+    - model_type (str) : the type of model to compile, must be 'Gaussian', 'Multinomial' or 'Bernoulli'
+    - (Optional)
+    """
+    
+    self.is_compiled = True
+    self.type = model_type
+    self.laplace_smoothing = kwargs.get('laplace_smoothing', 1)
+    
+    if model_type not in ("gaussian", "multinomial", "bernoulli"):
+      raise SystemError(f"Model type must be 'Gaussian', 'Multinomial' or 'Bernoulli' and not '{model_type}'")
+  
+  def fit(self, features, labels):
+    self.is_trained = True
+    
+    # laplace smoothing
+    for feature in features:
+      for i in range(len(feature)):
+        feature[i] += self.laplace_smoothing
+    
+    self.features = features
+    self.labels = labels
+  
+  def predict(self, point):
+    
+    if self.type == "gaussian":
+      pass
+    
+    elif self.type == "bernoulli":
+      pass
+    
+    elif self.type == "multinomial":
+      
+      # P(y) * prod P(xj|y)
+      
+      unique_classes = set(self.labels)
+      class_probabilities = []
+      
+      
+      for unique_class in unique_classes:
+        
+        # P(y)
+        P_y = math.log(self.labels.count(unique_class) / len(self.labels))
+        
+        # prod P(xj|y)
+        current_class_features = []
+        for feature, label in zip(self.features, self.labels):
+          if label == unique_class:
+            current_class_features.append(feature)
+        
+        current_class_feature_count = []
+        for cols in transpose(current_class_features):
+          current_class_feature_count.append(sum(cols))
+        
+        # summation part
+        P_xj_y = 0
+        for i in range(len(point)):
+          P_xj_y += math.log(self.features.count(point[i]) / len(self.features))
+        
+        # P(y) * prod P(xj|y)
+        class_probabilities.append(math.exp(P_y + P_xj_y))
+      
+      
+      print(f"{point} = {list(unique_classes)[class_probabilities.index(max(class_probabilities))]} ({max(class_probabilities)}%)")
+      return list(unique_classes)[class_probabilities.index(max(class_probabilities))]
+        
+    
 
 class SVM:
   def __init__(self):
@@ -478,7 +568,6 @@ class SVM:
     - kernel              (core.vanilla.kernel object) : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
     - maximum_iterations  (int)     : the maximum number of iterations to train the model for to prevent infinite loops
     - learning_rate       (float)   : the learning rate to use when training the model
-    - optimizer           (String)  : the optimizer to use
     - (Optional) c        (float)   : the regularization parameter
     - (Optional) l2lambda (float)   : the L2 regularization parameter
     """
@@ -576,3 +665,22 @@ class SVM:
       score += alpha * y_j * kernel_output
             
     return list(self.classes)[0] if score + self.b > 0 else list(self.classes)[1]
+
+class MSVM:
+  def __init__(self):
+    pass
+  
+  def compile(self):
+    pass
+  
+  def fit(self, features, labels):
+    pass
+  
+  def predict(self, point):
+    pass
+
+"""
+PLAN
+
+finish naive bayes and then begin on the MSVM (multiclass SVM)
+"""
