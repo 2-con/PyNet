@@ -1207,21 +1207,21 @@ class Sequential:
           
           layer_errors = arraytools.generate_array(thisx, thisy, channels, value=0)
 
-          skibidi = -1
+          counter_1 = -1
 
           for channel_index in range(channels):
             
             # iterate over all the layers
             for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
 
-              skibidi += 1
-              toilet = -1
+              counter_1 += 1
+              counter_2 = -1
 
               # # iterate over all the elements in the layer
               for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-                toilet += 1
+                counter_2 += 1
 
-                max_value = this_WS[skibidi][toilet]  # Get the maximum value
+                max_value = this_WS[counter_1][counter_2]  # Get the maximum value
                 count = 0  # Count of elements with the maximum value
 
                 # Find all elements with the maximum value in the pooling window
@@ -1236,7 +1236,7 @@ class Sequential:
                   for d in range(this_layer.size):
                     if a + c < len(weighted_sums[this_layer_index - 1][channel_index]) and b + d < len(weighted_sums[this_layer_index - 1][channel_index][a]):
                       if weighted_sums[this_layer_index - 1][channel_index][a + c][b + d] == max_value:
-                        layer_errors[channel_index][a + c][b + d] += prev_errors[skibidi][toilet] / count  # Divide by count
+                        layer_errors[channel_index][a + c][b + d] += prev_errors[counter_1][counter_2] / count  # Divide by count
                   
         ######################################################################################
         elif type(this_layer) == Meanpooling:
@@ -1248,19 +1248,19 @@ class Sequential:
           # for meanpooling, we need to distribute the error over the kernel size
           # this is done by dividing the error by the kernel size (averaging it over the kernel size)
 
-          skibidi = -1
+          counter_1 = -1
           
           for channel_index in range(channels):
             
             # iterate over all the layers
             for a in range(0, len(weighted_sums[this_layer_index-1]), this_layer.stride):
 
-              skibidi += 1
-              toilet = -1
+              counter_1 += 1
+              counter_2 = -1
 
               # iterate over all the elements in the layer
               for b in range(0, len(weighted_sums[this_layer_index-1][a]), this_layer.stride):
-                toilet += 1
+                counter_2 += 1
 
                 # control the vertical
                 for c in range(this_layer.size):
@@ -1272,7 +1272,7 @@ class Sequential:
 
                       # distribute the error over the kernel size
 
-                      layer_errors[channel_index][a+c][b+d] += prev_errors[channel_index][skibidi][toilet] / (this_layer.size**2)
+                      layer_errors[channel_index][a+c][b+d] += prev_errors[channel_index][counter_1][counter_2] / (this_layer.size**2)
 
         ######################################################################################
         elif type(this_layer) == Operation:
@@ -1914,17 +1914,17 @@ class Sequential:
           # to match pred size with model size
           if self.RNN or self.LSTM or self.GRU:
             
-            skibidi = 0
+            counter_1 = 0
             target = []
             
             for layer in self.layers:
               if layer.return_output == False:
                 target.append(0)
               else:
-                if skibidi >= len(targets[base_index + batch_index]):
+                if counter_1 >= len(targets[base_index + batch_index]):
                   raise IndexError("not enough elements in the targets to verify")
-                target.append(targets[base_index + batch_index][skibidi])
-                skibidi += 1
+                target.append(targets[base_index + batch_index][counter_1])
+                counter_1 += 1
           
           else:
             target = targets[base_index + batch_index]
@@ -2185,53 +2185,6 @@ class Sequential:
           x = layer.apply(x)
 
       return x
-
-  def summary(self, **kwargs) -> None:
-    """
-    Summary
-    """
-
-    counter = 0
-    traniable_params = 0
-    non_traniable_params = 0
-
-    print("| Model Summary:")
-    print("|")
-    print(f"|   Status    : {'Uncompiled' if self.optimizer is None or self.loss is None else 'Compiled':25} | Training   : {'Untrained!' if self.is_trained==False else 'Trained':15}")
-    print(f"|   Optimizer : {str(self.optimizer):25} | Validation : {'Validated' if self.is_validated else 'Unvalidated'}")
-    print(f"|   Loss      : {str(self.loss):25} | Final Loss : {self.error_logs[-1]:15} ")
-    print(f"|   Metrics   : {', '.join(self.metrics)}")
-    print("|")
-    print("| Model Overview:")
-    print("|")
-    print(f"|   Layer No.  | Layer Type  | Learnable | Input Shape | Output Shape | Layer Name")
-    print(f"|              |             |           |             |              |")
-
-    for layer in self.layers:
-      counter += 1
-
-      if type(layer) in (Dense, Localunit):
-        traniable_params += len(layer.neurons) * len(layer.neurons[0]['weights']) + 1 if layer.learnable else 0
-        non_traniable_params += len(layer.neurons) * len(layer.neurons[0]['weights']) + 1 if not layer.learnable else 0
-
-      elif type(layer) == Convolution:
-        traniable_params += len(layer.kernel) * len(layer.kernel[0]) + 1 if layer.learnable else 0
-        non_traniable_params += len(layer.kernel) * len(layer.kernel[0]) + 1 if not layer.learnable else 0
-
-      if type(layer) in (Dense, Convolution, Localunit):
-        learnable = True if layer.learnable else False
-        print(f"|   {counter:10} | {layer.__class__.__name__:11} | {str(learnable):10}| {str(self.sizes[counter-1]):11} | {str(self.sizes[counter]):12} | {layer.name:20}")
-
-      else:
-        print(f"|   {counter:10} | {layer.__class__.__name__:11} |           | {str(self.sizes[counter-1]):11} | {str(self.sizes[counter]):12} | {layer.name:20}")
-
-    print("|")
-    print("| Parameter Breakdown:")
-    print("|")
-    print(f"|   Trainable Parameters     : {traniable_params}")
-    print(f"|   Non-Trainable Parameters : {non_traniable_params}")
-    print(f"|   Total Parameters         : {traniable_params + non_traniable_params}")
-    print()
 
 #######################################################################################################
 #                                          Recurrent Class                                            #

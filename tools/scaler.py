@@ -54,16 +54,9 @@ def robust_scaler(x:list):
     answer.append(((i - q1) / iqr) if iqr != 0 else 0)
   return answer
 
-def softmax(x):
-  maximum = max(x)
-  exp_x = [math.exp(i-maximum) for i in x]
-  answer = [i / sum(exp_x) for i in exp_x]
-  
-  for x in answer:
-    if x in (math.inf, -math.inf) or type(x) not in (float, int):
-      raise Exception("overflow")
-  
-  return [(x if x>1e-100 else 0) for x in answer]
+def softmax(x:list):
+  exp_x = [math.exp(i-max(x)) for i in x]
+  return [(i-max(x)) / sum(exp_x) for i in exp_x]
 
 def argmax(x):
   return x.index(max(x))

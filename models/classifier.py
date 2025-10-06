@@ -9,12 +9,9 @@ Provides
 - K-Nearest Neighbors
 - Decision Tree
 - Random Forest
-- Naive Bayes
-- SVM
-"""
-
-"""
-might add adaboost at some point
+- Naive Bayes (Gaussian, Multinomial and Bernoulli models supported)
+- SVM (Support Vector Machine)
+- MSVM (Multiclass Support Vector Machine)
 """
 
 import sys, os
@@ -469,7 +466,7 @@ class NaiveBayes:
     self.is_compiled = False
     self.is_trained = False
 
-  def compile(self, model_type:str, **kwargs):
+  def compile(self, model_type:str, return_type:str="argmax", **kwargs):
     """
     Compile
     -----
@@ -478,51 +475,78 @@ class NaiveBayes:
     Args
     -----
     - model_type (str) : the type of model to compile, must be 'Gaussian', 'Multinomial' or 'Bernoulli'
-    - (Optional)
+    - return_type (str) : the type of return value, must be 'log', 'probability' or 'argmax', defaults to 'argmax'
+    - (Optional) laplace_smoothing (int) : the laplace smoothing to use for the multinomial and bernoulli models, defaults to 1
     """
     
     self.is_compiled = True
     self.type = model_type
+    self.return_type = return_type.lower()
     self.laplace_smoothing = kwargs.get('laplace_smoothing', 1)
     
     if model_type not in ("gaussian", "multinomial", "bernoulli"):
       raise SystemError(f"Model type must be 'Gaussian', 'Multinomial' or 'Bernoulli' and not '{model_type}'")
+    if self.return_type not in ("log", "probability", "argmax"):
+      raise SystemError(f"Return type must be 'log', 'probability', 'argmax' or 'softmax' and not '{self.return_type}'")
   
   def fit(self, features, labels):
+    """
+    Fit
+    -----
+      Calculates the necessary statistics to make predictions to be used later in the predict method. Make sure the data
+      aligns with the model type.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be an array of coordinates (2D array)
+    - labels   (list) : the labels of the dataset, must be an array of classes, it can be of any type
+    """
     self.is_trained = True
-    
-    # laplace smoothing
-    for feature in features:
-      for i in range(len(feature)):
-        feature[i] += self.laplace_smoothing
-    
-    self.features = features
-    self.labels = labels
-  
-  def predict(self, point):
+    self.unique_classes = set(labels)
+    self.cached_data = []
     
     if self.type == "gaussian":
+      # p(x|y) = (1 / sqrt(2 * pi * var)) * exp(- (x - mean)^2 / (2 * var))
+      # var = sum((x - mean)^2) / len(x)
+      # mean = sum(x) / len(x)
+      # variance is just the standard deviation squared
+      
+      # find the mean and variance of each feature per class
+      
+      # cached_data stores a per-class data containing [prior, [means, variances]],
+      
+      for unique_class in self.unique_classes:
+        
+        prior_probability = math.log(labels.count(unique_class) / len(labels))
+        
+        current_class_features = []
+        for feature, label in zip(features, labels):
+          if label == unique_class:
+            current_class_features.append(feature)
+        
+        current_class_feature_stats = []
+        for cols in transpose(current_class_features):
+          mean = sum(cols) / len(cols)
+          variance = sum((x - mean) ** 2 for x in cols) / len(cols)
+          current_class_feature_stats.append([mean, variance])
+        
+        self.cached_data.append([prior_probability, current_class_feature_stats])
+      
       pass
     
     elif self.type == "bernoulli":
-      pass
-    
-    elif self.type == "multinomial":
       
-      # P(y) * prod P(xj|y)
+      for feature in features:
+        for value in feature:
+          if value not in (0, 1):
+            raise ValueError(f"Bernoulli model only supports binary data (0 and 1), got {value}")
       
-      unique_classes = set(self.labels)
-      class_probabilities = []
+      # cashed_data stores a per-class data containing [count of Y,count of Y, feature counts]
       
-      
-      for unique_class in unique_classes:
+      for unique_class in self.unique_classes:
         
-        # P(y)
-        P_y = math.log(self.labels.count(unique_class) / len(self.labels))
-        
-        # prod P(xj|y)
         current_class_features = []
-        for feature, label in zip(self.features, self.labels):
+        for feature, label in zip(features, labels):
           if label == unique_class:
             current_class_features.append(feature)
         
@@ -530,27 +554,99 @@ class NaiveBayes:
         for cols in transpose(current_class_features):
           current_class_feature_count.append(sum(cols))
         
-        # summation part
-        P_xj_y = 0
-        for i in range(len(point)):
-          P_xj_y += math.log(self.features.count(point[i]) / len(self.features))
-        
-        # P(y) * prod P(xj|y)
-        class_probabilities.append(math.exp(P_y + P_xj_y))
-      
-      
-      print(f"{point} = {list(unique_classes)[class_probabilities.index(max(class_probabilities))]} ({max(class_probabilities)}%)")
-      return list(unique_classes)[class_probabilities.index(max(class_probabilities))]
-        
+        self.cached_data.append([len(current_class_features), current_class_feature_count])
     
+    elif self.type == "multinomial":
+      # cached_data stores a per-class data containing [prior, feature counts]
+      
+      for unique_class in self.unique_classes:
+        
+        prior_probability = math.log(labels.count(unique_class) / len(labels))
+        
+        current_class_features = []
+        for feature, label in zip(features, labels):
+          if label == unique_class:
+            current_class_features.append(feature)
+        
+        current_class_feature_count = []
+        for cols in transpose(current_class_features):
+          current_class_feature_count.append(sum(cols))
+        
+        self.cached_data.append([prior_probability, current_class_feature_count])
+      
+  def predict(self, point):
+    """
+    Predict
+    -----
+      Predicts the class of a point, the model must be compiled and trained before using this method.
+    -----
+    Args:
+    -----
+    - point (list) : the point to predict, a vector (list of intigers or floats)
+    """
+    
+    log_class_probabilities = []
+    
+    if self.type == "gaussian":
+      
+      for prior_probability, current_class_feature_stats in self.cached_data:
+        
+        log_likelyhood = 0
+        for i in range(len(point)):
+          mean, variance = current_class_feature_stats[i]
+          
+          exponent = math.exp(- ((point[i] - mean) ** 2) / (2 * variance)) if variance > 0 else 0
+          likelihood = (1 / math.sqrt(2 * math.pi * variance)) * exponent if variance > 0 else 0
+          
+          log_likelyhood += math.log(likelihood) if likelihood > 0 else -1000 # prevent log(0)
+        
+        log_class_probabilities.append(prior_probability + log_likelyhood)
+        
+    elif self.type == "bernoulli":
+      
+      for class_count, current_class_feature_count in self.cached_data:
+        
+        prior_probability = math.log(class_count / sum(c[0] for c in self.cached_data))
+        denominator = class_count + self.laplace_smoothing * 2
+        
+        log_likelyhood = 0
+        for i in range(len(point)):
+          numerator = current_class_feature_count[i] + self.laplace_smoothing
+          probability = numerator / denominator
+          
+          log_likelyhood += math.log(probability) if point[i] == 1 else math.log(1 - probability)
+        
+        log_class_probabilities.append(prior_probability + log_likelyhood)
+    
+    elif self.type == "multinomial":
+      
+      for prior_probability, current_class_feature_count in self.cached_data:
+        
+        log_likelyhood = 0
+        for i in range(len(point)):
+          numerator = current_class_feature_count[i] + self.laplace_smoothing
+          denominator = sum(current_class_feature_count) + self.laplace_smoothing * len(current_class_feature_count)
+          log_likelyhood += math.log(numerator / denominator) * point[i]
+        
+        log_class_probabilities.append(prior_probability + log_likelyhood)
+    
+    if self.return_type == "log":
+      return log_class_probabilities
+    elif self.return_type == "probability":
+      max_log = max(log_class_probabilities)
+      exp_probs = [math.exp(lp - max_log) for lp in log_class_probabilities] # prevent overflow
+      sum_exp_probs = sum(exp_probs)
+      return [p / sum_exp_probs for p in exp_probs]
+    elif self.return_type == "argmax":
+      return list(self.unique_classes)[log_class_probabilities.index(max(log_class_probabilities))]
 
 class SVM:
   def __init__(self):
     """
     Support Vector Machine
     -----
-      Predicts the class of a point based on a boundary. Note that this is a simple implimentation and does not use the kernel trick
-      for complex data transformations.
+      Predicts the class of a point based on a boundary. Note that SVMs only support binary classification, for multiclass
+      classification, use the MSVM class.
     """
     self.alphas = []
     self.b = 0
@@ -565,11 +661,12 @@ class SVM:
     -----
     Args
     -----
-    - kernel              (core.vanilla.kernel object) : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
-    - maximum_iterations  (int)     : the maximum number of iterations to train the model for to prevent infinite loops
-    - learning_rate       (float)   : the learning rate to use when training the model
-    - (Optional) c        (float)   : the regularization parameter
-    - (Optional) l2lambda (float)   : the L2 regularization parameter
+    - kernel                    (core.vanilla.kernel object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
+    - maximum_iterations        (int)                         : the maximum number of iterations to train the model for to prevent infinite loops
+    - learning_rate             (float)                       : the learning rate to use when training the model
+    - (Optional) c              (float)                       : the regularization parameter
+    - (Optional) l2lambda       (float)                       : the L2 regularization parameter
+    - (Optional) return_scores  (bool)                        : if True, the predict method will return the score instead of the class, defaults to False
     """
     self.kernel = kernel
     self.learning_rate = learning_rate
@@ -579,6 +676,7 @@ class SVM:
     self.is_compiled = True
     self.c = kwargs.get('c', 1E+10) # regularization parameter
     self.l2lambda = kwargs.get('l2lambda', 0.01) # L2 regularization parameter
+    self.return_scores = kwargs.get('return_scores', False) # if True, the predict method will return the score instead of the class
     
   def fit(self, features:list, labels:list):
     """
@@ -663,24 +761,105 @@ class SVM:
 
       kernel_output = self.kernel(x_j, point)
       score += alpha * y_j * kernel_output
-            
+    
+    if self.return_scores:
+      return score + self.b
+    
     return list(self.classes)[0] if score + self.b > 0 else list(self.classes)[1]
 
 class MSVM:
   def __init__(self):
-    pass
+    """
+    Multiclass Support Vector Machine
+    -----
+      Predicts the class of a point based on a boundary. Works by using multiple SVMs to classify the data.
+    """
+    self.alphas = []
+    self.b = 0
+    self.is_compiled = False
+    self.is_trained = False
+    self.models = []
   
-  def compile(self):
-    pass
+  def compile(self, kernel:str, maximum_iterations:int, learning_rate:float|int, *args, **kwargs):
+    """
+    Compile
+    -----
+      Compiles the model to be ready for training.
+    -----
+    Args
+    -----
+    - kernel                    (core.vanilla.kernel object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
+    - maximum_iterations        (int)                         : the maximum number of iterations to train the model for to prevent infinite loops
+    - learning_rate             (float)                       : the learning rate to use when training the model
+    - (Optional) c              (float)                       : the regularization parameter
+    - (Optional) l2lambda       (float)                       : the L2 regularization parameter
+    - (Optional) return_scores  (bool)                        : if True, the predict method will return the score instead of the class, defaults to False
+    """
+    # might just implement this later, for now stick to OvA
+    # - type                (str)     : the type of multiclass SVM to use, must be 'OvO' (one-vs-one) or 'OvA' (one-vs-all)
+    
+    self.kernel = kernel
+    self.learning_rate = learning_rate
+    self.b = 0
+    self.max_iter = maximum_iterations
+    self.classes = set()
+    self.is_compiled = True
+    self.c = kwargs.get('c', 1E+10) # regularization parameter
+    self.l2lambda = kwargs.get('l2lambda', 0.01) # L2 regularization parameter
+    self.return_scores = kwargs.get('return_scores', False) # if True, the predict method will return the score instead of the class
   
   def fit(self, features, labels):
-    pass
+    """
+    Fit
+    -----
+      Fits the model to the data, training the support vector machine.
+    -----
+    Args:
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 1D array
+    """
+    if not self.is_compiled:
+      raise SystemError("Model must be compiled before fitting")
+    
+    # check and normalize data
+    if len(shape(features)) != 2:
+      raise TypeError(f"Features must be a 2D array, got {shape(features)}")
+    if len(shape(labels)) != 1:
+      raise TypeError(f"Labels must be a 1D array, got {shape(labels)}")
+    
+    # convert data to ova format
+    self.models = []
+    self.classes = set(labels)
+    
+    for current_class in self.classes:
+      binary_labels = [1 if x == current_class else -1 for x in labels]
+      
+      model = SVM()
+      model.compile(self.kernel, self.max_iter, self.learning_rate, c=self.c, l2lambda=self.l2lambda, return_scores=True)
+      model.fit(features, binary_labels)
+      
+      self.models.append(model)
+    
+    self.is_trained = True
   
   def predict(self, point):
-    pass
+    """
+    Predict
+    -----
+      Predicts the class of a point, the model must be compiled before using this method.
+    -----
+    Args
+    -----
+    - point (list) : the point to predict, a vector (list of intigers or floats)
+    """
+    if not self.is_compiled:
+      raise SystemError("Model must be compiled before predicting anything")
+    if not self.is_trained:
+      raise SystemError("Model must be trained before predicting anything")
+    
+    scores = [model.predict(point) for model in self.models]
+    if self.return_scores:
+      return scores
+    return list(self.classes)[scores.index(max(scores))]
 
-"""
-PLAN
-
-finish naive bayes and then begin on the MSVM (multiclass SVM)
-"""

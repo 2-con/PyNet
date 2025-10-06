@@ -96,3 +96,16 @@ def Variance(items:list):
   
   return variance
 
+def majority(items:list):
+  """
+  Vote
+  -----
+    Returns the most common item in a list.
+  -----
+  Args:
+    items (list): The list of items to vote on.
+  -----
+  Returns:
+    The most common item in the list.
+  """
+  return max(set(items), key=items.count)

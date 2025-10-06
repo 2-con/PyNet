@@ -21,7 +21,64 @@ PyNet is committed to democratizing and opening up machine learning and artifici
 ---
 
 ### Getting Started 🚀
-TEXT
+
+PyNet's interface are designed to be intuitive. Although the usage may vary depending on the model, the core approach is still the same
+
+#### For Core APIs
+All the core models have similar method names and procedures with the exception of alpha which has its own system.
+
+    # create a model instance
+    MODEL = sequential(
+      layer1,
+      layer2,
+      ...
+    )
+
+    # model must be compiled
+    MODEL.compile(
+      ...
+    )
+
+    # train the model. make sure the inputs are of the appropriate datatype
+    MODEL.fit(feature,labels)
+
+    # the model can be used after training.
+    MODEL.push(input)
+  
+#### PyNet Alpha
+PyNet Alpha is found in the API folder, its an API in the sense that it is completely independent from PyNet by using its own management system and interface to interact with itself. PyNet Alpha is also the earliest functional model that is meant to be an introductory model to be disected and studied.
+
+    # create a list of weights
+    MODEL = Initialize(...)
+
+    # use a built-in method...
+    train(network, features, targets, ...)
+
+    # or build your own method (as long as the methods are being used properly)
+    for epoch in range(epochs):
+      for feature, target in zip(features, targets):
+        activations, weighted_sums = propagate(network, feature, ReLU)
+        error = backpropegate(network, activations, weighted_sums, target, ReLU_derivative)
+        
+        update(network, activations, error, learning_rate)
+
+      if epoch % 10 == 0:
+        print(f"Epoch {epoch:5} | Error {mse(target, activations[-1])}")
+
+#### Other models
+PyNet also have other models for regression, classification and clustering under the "models" folder.
+
+    # using a linear regression as an example
+    MODEL = Linear(...)
+
+    # simmilar to 
+    MODEL.compile(...)
+
+    # only some models have a "fit" method, some like K-Nearest Neighbors dont have this method at all.
+    MODEL.fit(features, labels)
+
+    # simmilar to the "push" method from the core APIs
+    MODEL.predict(...)
 
 ---
 
@@ -55,7 +112,7 @@ A high-performance API built around the JAX ecosystem, leveraging JNP operations
 
 ---
 #### NetLab API
-Lorem ipsum dolor sit amet
+An experiment-oriented API using JNP and the JAX ecosystem, unlike NetFlash, NetLab aims to provide an easier way to experiment and configure tests by providing additional features and scaling back some features. NetLab encourage the use of custom implimentations as long as it follows strict guidelines on how to design such implimentations.
 
 ---
 #### NetCore API
@@ -96,6 +153,21 @@ For a more detailed description on specific APIs or layers, refer to the documen
 ### Additional Features ⚒️
 
 Aside from APIs and layers, PyNet also contains other features that could aid in your project or experiment.  
+
+#### Arraytools
+Tools for dealing with tensors and lists in python. While not as extensive as NumPy or JNP, it is still quite useful for custom implimentations.
+
+#### Math
+A place to store general functions that dosent fit into any category (loss, activation, etc...). PyNet aims to organize the code to the best of our ability.
+
+#### Scaler
+Simmilar to the Math file, this contains functions that deal with vectors (1D lists), unlike ArrayTools, these functions are not linear algebra oriented and more statistics-heavy
+
+#### Utility
+General-use functions including wrappers and iterators. 
+
+#### Visual
+Functions used to display and visualize PyNet objects useful for debugging.
 
 ---
 ### Regressors

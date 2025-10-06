@@ -194,6 +194,7 @@ def train(network, features, targets, learning_rate: float, epochs: int, **kwarg
   -----
   Source Code
   -----
+  
   for epoch in range(epochs):
     for feature, target in zip(features, targets):
       activations, weighted_sums = propagate(network, feature, ReLU)

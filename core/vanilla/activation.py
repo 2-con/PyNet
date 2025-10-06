@@ -21,8 +21,8 @@ def Softsign(x, **kwargs):
   return x / (1 + abs(x))
 
 def Softmax(x, **kwargs):
-  exp_x = [math.exp(i) for i in x]
-  return [i / sum(exp_x) for i in exp_x]
+  exp_x = [math.exp(i-max(x)) for i in x]
+  return [(i-max(x)) / sum(exp_x) for i in exp_x]
 
 # rectifiers
 

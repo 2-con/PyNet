@@ -41,11 +41,9 @@ import jax.numpy as jnp
 from tools import utility
 from core.flash import loss, optimizer, metric, derivative
 from core.flash.layers import *
-
+from core.flash.callback import Callback
 from core.vanilla.utility import do_nothing
 from system.config import *
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 
 #######################################################################################################
 #                                               Extra                                                 #
@@ -367,7 +365,7 @@ class Sequential:
     #                                        Callbacks                                         #
     ############################################################################################
     
-    self.callback = kwargs.get('callback', [])
+    self.callback = kwargs.get('callback', Callback)
     
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
@@ -556,7 +554,7 @@ class Sequential:
         current_params, current_opt_state = update_step(
           tuple(self.layers),
           backward_func_tuple,
-          initial_error,  # no transpose
+          initial_error,  
           self.params_pytree,
           self.opt_state,
           activations_and_weighted_sums['activations'],

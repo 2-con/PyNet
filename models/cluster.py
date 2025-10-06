@@ -17,19 +17,39 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 class KMeans:
-  def fit(self, clusters, points, **kwargs):
-    epochs = kwargs.get('epochs', 10)
+  def __init__(self):
+    """
+    K-Means clustering algorithm
+    """
+    
+    self.centroids = []
+    self.is_fitted = False
+  
+  def compile(self, *args, **kwargs):
+    self.is_compiled = True
+    
+  def fit(self, points, **kwargs):
 
     # find the k means
-    for _ in range(epochs):
-      pass
+    ...
 
   def predict(self, point):
     pass
 
 class DBScan:
+  def __init__(self):
+    """
+    DBScan clustering algorithm
+    """
+    
+    self.centroids = []
+    self.is_fitted = False
+  
+  def compile(self, *args, **kwargs):
+    self.is_compiled = True
+    
   def fit(self, points, **kwargs):
-    epochs = kwargs.get('epochs', 10)
-
+    # find the clusters
+    ...
   def predict(self, point):
     pass
