@@ -532,6 +532,9 @@ class Sequential:
       epoch_loss = 0.0
 
       for base_index in range(0, len(features), self.batchsize):
+        if base_index + self.batchsize > len(features):
+          break
+        
         key = jax.random.PRNGKey(random.randint(0, 2**32))  
 
         num_samples = features.shape[0]

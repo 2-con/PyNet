@@ -23,6 +23,22 @@ from core.vanilla.datafield import Datacontainer as dc
 import random
 import math
 
+class Key:
+  METRICS = {
+    'accuracy': lambda y_true, y_pred: sum(1 for true, pred in zip(y_true, y_pred) if true == pred) / len(y_true),
+    'precision': lambda y_true, y_pred: sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) 
+                                      / sum(1 for pred in y_pred if pred == 1),
+    'recall': lambda y_true, y_pred: sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) 
+                                   / sum(1 for true in y_true if true == 1),
+    'f1_score': lambda y_true, y_pred: 
+      (2 * (sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) / sum(1 for pred in y_pred if pred == 1)) ** 2) 
+        / ((sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) / sum(1 for pred in y_pred if pred == 1)) * 2) 
+        if (sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) > 0) else 0.0,
+    'roc_auc': lambda y_true, y_pred: 
+     sum(1 for true, pred in zip(y_true, y_pred) if true == pred and pred == 1) / 
+    (sum(1 for true in y_true if true == 1) + sum(1 for true in y_true if true == 0)) # simplified version
+  }
+
 class KNN:
   def __init__(self):
     """
@@ -94,6 +110,25 @@ class KNN:
     
     # return the most common label
     return max(set(neighbors_labels), key=neighbors_labels.count)
+  
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]
 
 class DecisionTree:
   def __init__(self):
@@ -294,6 +329,25 @@ class DecisionTree:
           current_node = current_node.children[0]
         else:
           current_node = current_node.children[1]
+  
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]
 
 class RandomForest:
   def __init__(self):
@@ -455,6 +509,25 @@ class RandomForest:
         vote_count[vote] = 1
     
     return max(vote_count, key=vote_count.get)
+
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]
 
 class NaiveBayes:
   def __init__(self):
@@ -640,6 +713,25 @@ class NaiveBayes:
     elif self.return_type == "argmax":
       return list(self.unique_classes)[log_class_probabilities.index(max(log_class_probabilities))]
 
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]
+
 class SVM:
   def __init__(self):
     """
@@ -767,6 +859,25 @@ class SVM:
     
     return list(self.classes)[0] if score + self.b > 0 else list(self.classes)[1]
 
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]
+
 class MSVM:
   def __init__(self):
     """
@@ -863,3 +974,21 @@ class MSVM:
       return scores
     return list(self.classes)[scores.index(max(scores))]
 
+  def evaluate(self, features, labels, metrics:list):
+    """
+    Evaluate
+    -----
+      Evaluates the model on a test set using a specified metric.
+    -----
+    Args
+    -----
+    - features (list) : the features of the dataset, must be a 2D array
+    - labels   (list) : the labels of the dataset, must be a 2D array
+    - metrics   (list) : the metrics to use for evaluation, must be 'accuracy', 'precision', 'recall', 'f1_score' or 'roc_auc'
+    """
+    
+    for metric in metrics:
+      if metric not in Key.METRICS:
+        raise ValueError(f"Metric must be one of {list(Key.METRICS.keys())}, got '{metric}'")
+    
+    return [Key.METRICS[m](labels, [self.predict(feature) for feature in features]) for m in metrics]

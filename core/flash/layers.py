@@ -125,7 +125,10 @@ returns:
 
 """ Todo:
 
+impliment parametric stuff in here,
+instead of **KWARGS make it *ARGS so that the user can pass in anything they want
 
+convert the forward and backward func into class methods to make it easier to integrate parametric functions
 
 """
 
@@ -205,6 +208,8 @@ class Dense:
     self.input_size = fan_in[0]
     weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in[0], fan_out_shape)
     biases = jnp.zeros((self.neuron_amount,))
+    
+    
     return {'weights': weights, 'biases': biases}, (self.neuron_amount,)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -239,9 +244,9 @@ class Localunit:
     -----
     Args
     -----
-    - receptive_field (int)     : the size of the receptive field for each neuron
-    - activation      (string)  : the activation function
-    - (Optional) name (string)  : the name of the layer
+    - receptive_field (int)    : the size of the receptive field for each neuron
+    - activation      (string) : the activation function
+    - (Optional) name (string) : the name of the layer
     -----
     Activation functions
     - ReLU

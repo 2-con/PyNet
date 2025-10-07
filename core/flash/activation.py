@@ -6,63 +6,65 @@ from system.defaults import *
 
 # normalization
 
-def Sigmoid(x, **kwargs):
+def Sigmoid(x, *parametric):
   return 1.0 / (1.0 + jnp.exp(-x))
 
-def Tanh(x, **kwargs):
+def Tanh(x, *parametric):
   return jnp.tanh(x)
 
-def Binary_step(x, **kwargs):
+def Binary_step(x, *parametric):
   return jnp.where(x > 0, 1.0, 0.0)
 
-def Softsign(x, **kwargs):
+def Softsign(x, *parametric):
   return x / (1.0 + jnp.abs(x))
 
-def Softmax(x, **kwargs):
+def Softmax(x, *parametric):
   exp_x = jnp.exp(x - jnp.max(x, axis=-1, keepdims=True))
   return exp_x / jnp.sum(exp_x, axis=-1, keepdims=True)
 
 # rectifier
 
-def ReLU(x, **kwargs):
+def ReLU(x, *parametric):
   return jnp.maximum(0.0, x)
 
-def Softplus(x, **kwargs):
+def Softplus(x, *parametric):
   return jnp.log(1.0 + jnp.exp(x))
 
-def Mish(x, **kwargs):
+def Mish(x, *parametric):
   return x * jnp.tanh(jnp.log(1.0 + jnp.exp(x)))
 
-def Swish(x, **kwargs):
+def Swish(x, *parametric):
   return x * Sigmoid(x)
 
-def Leaky_ReLU(x, **kwargs):
+def Leaky_ReLU(x, *parametric):
   return jnp.maximum(0.1 * x, x)
 
-def GELU(x, **kwargs):
+def GELU(x, *parametric):
   return jax.nn.gelu(x)
 
-def Linear(x, **kwargs):
+def Linear(x, *parametric):
   return x
 
-def ReEU(x, **kwargs):
+def ReEU(x, *parametric):
   conditions = [x > 10, x < -10]
   choices = [x, 0.0]
   return jnp.select(conditions, choices, default=jnp.minimum(jnp.exp(x), jnp.maximum(1.0, x + 1.0)))
 
-def ReTanh(x, **kwargs):
+def ReTanh(x, *parametric):
   return x * (jnp.tanh(x + 1.0) + 1.0) / 2.0
 
-def ELU(x, alpha=ELU_alpha_default, **kwargs):
+# parametrics
+
+def ELU(x, *parametric):
   conditions = [x > 0, x < -10]
   choices = [x, -1.0]
-  return jnp.select(conditions, choices, default=alpha * (jnp.exp(x) - 1.0))
+  return jnp.select(conditions, choices, default=parametric[0] * (jnp.exp(x) - 1.0))
 
-def SELU(x, alpha=SELU_alpha_default, beta=SELU_beta_default, **kwargs):
-  return beta * jnp.where(x > 0, x, alpha * (jnp.exp(x) - 1.0))
+def SELU(x, *parametric):
+  return jnp.where(x > 0, x, parametric[0] * (jnp.exp(x) - 1.0))
 
-def PReLU(x, alpha=PReLU_alpha_default, **kwargs):
-  return jnp.maximum(alpha * x, x)
+def PReLU(x, *parametric):
+  return jnp.maximum(parametric[0] * x, x)
 
-def SiLU(x, alpha=SiLU_alpha_default, **kwargs):
-  return x * Sigmoid(alpha * x)
+def SiLU(x, *parametric):
+  return x * Sigmoid(parametric[0] * x)
