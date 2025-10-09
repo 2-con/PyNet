@@ -7,7 +7,7 @@ A centralized location for default values of internal variables and/or values
 
 # Activation functions
 #   these values are only used when the function is used outside of any PyNet APIs since all layers in this
-#   framework will initialize all alpha and beta values to 1 regardless of the function type
+#   framework will initialize all alpha and beta values regardless of the function type
 
 ELU_alpha_default = 1.0
 

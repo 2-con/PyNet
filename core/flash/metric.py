@@ -45,7 +45,6 @@ def Accuracy(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
 
   return jnp.where(total != 0, (correct / total) * 100.0, jnp.array(0.0))
 
-
 def Precision(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """
   Precision (for Binary Classification)
@@ -85,7 +84,6 @@ def Precision(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
 
   denominator = true_positive + false_positive
   return jnp.where(denominator != 0, (true_positive / denominator) * 100.0, jnp.array(0.0))
-
 
 def Recall(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """
@@ -127,7 +125,6 @@ def Recall(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   denominator = true_positive + false_negative
   return jnp.where(denominator != 0, (true_positive / denominator) * 100.0, jnp.array(0.0))
 
-
 def F1_score(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """
   F1 Score (for Binary Classification)
@@ -151,7 +148,6 @@ def F1_score(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
 
   denominator = precision_val + recall_val
   return jnp.where(denominator != 0, 2 * (precision_val * recall_val) / denominator, jnp.array(0.0))
-
 
 def ROC_AUC(y_true: jnp.ndarray, y_pred_prob: jnp.ndarray) -> jnp.ndarray:
   """
@@ -237,7 +233,6 @@ def ROC_AUC(y_true: jnp.ndarray, y_pred_prob: jnp.ndarray) -> jnp.ndarray:
   auc = jnp.clip(auc, 0.0, 1.0) # Ensure AUC is within [0, 1] range
 
   return auc
-
 
 def R2_Score(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """

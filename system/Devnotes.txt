@@ -1,1 +1,9 @@
 
+Timeline
+Now (in progress) → research → publish → cleanup → release
+
+Things to do
+  Add unsupervised learning algorithms
+  Build NetLab
+
+  mess around with RL maybe?

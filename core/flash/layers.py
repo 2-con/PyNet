@@ -19,55 +19,28 @@ class Key:
   ACTIVATION = {
     
     # normalization functions
-    "sigmoid": activation.Sigmoid,
-    "tanh": activation.Tanh,
-    "binary step": activation.Binary_step,
-    "softsign": activation.Softsign,
-    "softmax": activation.Softmax,
+    "sigmoid": activation.Sigmoid(),
+    "tanh": activation.Tanh(),
+    "binary step": activation.Binary_step(),
+    "softsign": activation.Softsign(),
+    "softmax": activation.Softmax(),
     
     # rectifiers
-    "relu": activation.ReLU,
-    "softplus": activation.Softplus,
-    "mish": activation.Mish,
-    "swish": activation.Swish,
-    "leaky relu": activation.Leaky_ReLU,
-    "gelu": activation.GELU,
-    "identity": activation.Linear,
-    "reeu": activation.ReEU,
-    "retanh": activation.ReTanh,
+    "relu": activation.ReLU(),
+    "softplus": activation.Softplus(),
+    "mish": activation.Mish(),
+    "swish": activation.Swish(),
+    "leaky relu": activation.Leaky_ReLU(),
+    "gelu": activation.GELU(),
+    "identity": activation.Linear(),
+    "reeu": activation.ReEU(),
+    "retanh": activation.ReTanh(),
     
     # parametric functions
-    'elu': activation.ELU,
-    "selu": activation.SELU,
-    "prelu": activation.PReLU,
-    "silu": activation.SiLU,
-  }
-  
-  ACTIVATION_DERIVATIVE = {
-    
-    # normalization functions
-    "sigmoid": derivative.Sigmoid_derivative,
-    "tanh": derivative.Tanh_derivative,
-    "binary step": derivative.Binary_step_derivative,
-    "softsign": derivative.Softsign_derivative,
-    "softmax": derivative.Softmax_derivative,
-    
-    # rectifiers
-    "relu": derivative.ReLU_derivative,
-    "softplus": derivative.Softplus_derivative,
-    "mish": derivative.Mish_derivative,
-    "swish": derivative.Swish_derivative,
-    "leaky relu": derivative.Leaky_ReLU_derivative,
-    "gelu": derivative.GELU_derivative,
-    "identity": derivative.Linear_derivative,
-    "reeu": derivative.ReEU_derivative,
-    "retanh": derivative.ReTanh_derivative,
-    
-    # parametric functions
-    'elu': derivative.ELU_derivative,
-    "selu": derivative.SELU_derivative,
-    "prelu": derivative.PReLU_derivative,
-    "silu": derivative.SiLU_derivative
+    'elu': activation.ELU(),
+    "selu": activation.SELU(),
+    "prelu": activation.PReLU(),
+    "silu": activation.SiLU(),
   }
   
   SCALER = {
@@ -185,11 +158,17 @@ class Dense:
     self.neuron_amount = neurons
     self.name = name
     
-    if activation.lower() not in Key.ACTIVATION:
-      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
-    
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     self.initializer_fn = Key.INITIALIZER['default']
     if activation.lower() in rectifiers:
@@ -208,20 +187,31 @@ class Dense:
     self.input_size = fan_in[0]
     weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in[0], fan_out_shape)
     biases = jnp.zeros((self.neuron_amount,))
+    paremetric_parameters = {
+      paramater_name: self.initializer_fn((self.neuron_amount,), fan_in[0], fan_out_shape) for paramater_name in self.activation_object.parameters
+    }
     
-    
-    return {'weights': weights, 'biases': biases}, (self.neuron_amount,)
+    return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.neuron_amount,)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, in_features), weights: (in_features, out_features)
     weighted_sums = inputs @ params['weights'] + params['biases']
-    activated_output = self.activation_fn(weighted_sums)
+    activated_output = self.activation_fn(weighted_sums, **params)
     return activated_output, weighted_sums
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     # error: (batch, out_features), inputs: (batch, in_features)
-    grads_z = self.activation_derivative_fn(error, weighted_sums)
-
+    
+    all_grads = self.activation_derivative_fn(error, weighted_sums, **params)
+    
+    parameter_grads = {}
+    for name, grad in all_grads.items():
+      
+      if name != 'x':
+        parameter_grads[name] = grad
+    
+    grads_z = all_grads['x']
+    
     grads_weights = jnp.einsum("bi,bj->ij", inputs, grads_z)  # (in_features, out_features)
     
     grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
@@ -229,7 +219,8 @@ class Dense:
 
     param_grads = {
       'weights': grads_weights,
-      'biases': grads_biases
+      'biases': grads_biases,
+      **parameter_grads
     }
 
     return upstream_gradient, param_grads
@@ -287,11 +278,17 @@ class Localunit:
     self.receptive_field = receptive_field
     self.name = name
     
-    if activation.lower() not in Key.ACTIVATION:
-      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
-    
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     self.initializer_fn = Key.INITIALIZER['default']
     if activation.lower() in rectifiers:
@@ -319,9 +316,7 @@ class Localunit:
     
     for i in range(height):
       row = [0 for _ in range(fan_in[0])]
-      
       for j in range(fan_in[0]):
-        
         if j+i < fan_in[0] and j+i >= i and j < self.receptive_field:
           row[j+i] = 1
       
@@ -333,18 +328,29 @@ class Localunit:
     self.input_size = fan_in[0]
     weights = self.initializer_fn((self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape)
     biases = jnp.zeros((self.mask.shape[1],))
+    paremetric_parameters = {
+      paramater_name: self.initializer((self.mask.shape[0],), fan_in[0], fan_out_shape) for paramater_name in self.activation_object.parameters
+    }
     
-    return {'weights': weights, 'biases': biases}, (self.mask.shape[0],)
+    return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.mask.shape[0],)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, in_features), weights: (in_features, out_features)
     weighted_sums = inputs @ (params['weights'] * self.mask) + params['biases']
-    activated_output = self.activation_fn(weighted_sums)
+    activated_output = self.activation_fn(weighted_sums, **params)
     return activated_output, weighted_sums
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     # error: (batch, out_features), inputs: (batch, in_features)
-    grads_z = self.activation_derivative_fn(error, weighted_sums)
+    all_grads = self.activation_derivative_fn(error, weighted_sums, **params)
+    
+    parameter_grads = {}
+    for name, grad in all_grads.items():
+      
+      if name != 'x':
+        parameter_grads[name] = grad
+    
+    grads_z = all_grads['x']
 
     grads_weights = jnp.einsum("bi,bj->ij", inputs, grads_z) * self.mask  # (in_features, out_features)
     
@@ -353,7 +359,8 @@ class Localunit:
 
     param_grads = {
       'weights': grads_weights,
-      'biases': grads_biases
+      'biases': grads_biases,
+      **parameter_grads
     }
 
     return upstream_gradient, param_grads
@@ -364,7 +371,7 @@ class Convolution:
     Convolution
     -----
       Convolution that is fixed with a valid padding and no dilation. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
-      (Image Height, Image Width, Channels).
+      (Channels, Image Height, Image Width).
     -----
     Args
     -----
@@ -416,11 +423,17 @@ class Convolution:
     self.stride = stride
     self.name = name
 
-    if activation.lower() not in Key.ACTIVATION:
-      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
-
-    self.activation_function = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     self.params = {}
     self.input_shape = None
@@ -435,9 +448,9 @@ class Convolution:
       self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
     else:
       # He for rectifiers, Glorot for normalizers, else default
-      if self.activation_function in rectifiers:
+      if activation.lower() in rectifiers:
         self.initializer_fn = Key.INITIALIZER["he normal"]
-      elif self.activation_function in normalization:
+      elif activation.lower() in normalization:
         self.initializer_fn = Key.INITIALIZER["glorot normal"]
       else:
         self.initializer_fn = Key.INITIALIZER["default"]
@@ -446,18 +459,22 @@ class Convolution:
     # fan_in_shape = (C_in, H, W)
     C_in, H, W = fan_in_shape
 
-    self.params["weights"] = self.initializer_fn(
+    weights = self.initializer_fn(
       (self.channels, C_in, *self.kernel),
       C_in * self.kernel[0] * self.kernel[1],
       fan_out_shape,
     )
-    self.params["biases"] = jnp.zeros((self.channels,))
+    biases = jnp.zeros((self.channels,))
 
     # output dims (VALID padding)
     out_H = (H - self.kernel[0]) // self.stride[0] + 1
     out_W = (W - self.kernel[1]) // self.stride[1] + 1
 
-    return self.params, (self.channels, out_H, out_W)
+    parametrics = {
+      paramater_name: self.initializer_fn((self.channels,), C_in * self.kernel[0] * self.kernel[1], fan_out_shape) for paramater_name in self.activation_object.parameters
+    }
+    
+    return {"weights": weights, "biases": biases, **parametrics}, (self.channels, out_H, out_W)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
@@ -478,15 +495,22 @@ class Convolution:
 
     bias = params["biases"][jnp.newaxis, :, jnp.newaxis, jnp.newaxis]
     WS = convolved + bias
-    activated = self.activation_function(WS)
+    activated = self.activation_fn(WS, **params)
     return activated, WS
 
   def backward(self, params:dict, inputs:jnp.ndarray, upstream_error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     if inputs.ndim != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
-    d_WS = self.activation_derivative(upstream_error, weighted_sums)  # (N, C_out, H_out, W_out)
+    all_grads = self.activation_derivative_fn(upstream_error, weighted_sums, **params)
+    
+    parametric_gradients = {}
+    for name, gradient in all_grads.items():
+      if name != 'x':
+        parametric_gradients[name] = gradient  # (C_out,)
 
+    d_WS = all_grads['x']  # (N, C_out, H_out, W_out)
+    
     # bias gradients
     grad_bias = jnp.sum(d_WS, axis=(0, 2, 3))  # (C_out,)
 
@@ -568,8 +592,7 @@ class Convolution:
       stride=self.stride
     )
 
-    param_gradients = {"weights": grad_weights, "biases": grad_bias}
-    return upstream_gradient, param_gradients
+    return upstream_gradient, {"weights": grad_weights, "biases": grad_bias, **parametric_gradients}
 
 class Deconvolution:
   def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int], name:str="Null", *args, **kwargs):
@@ -577,7 +600,7 @@ class Deconvolution:
     Deconvolution
     -----
       a Deconvolution layer within the context of deep learning is actually a transposed convolution. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
-      (Image Height, Image Width, Channels).
+      (Channels, Image Height, Image Width).
     -----
     Args
     -----
@@ -629,11 +652,17 @@ class Deconvolution:
     self.name = name
     self.stride = stride
 
-    if activation.lower() not in Key.ACTIVATION:
-      raise ValueError(f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}")
-
-    self.activation_function = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     self.params = {}
     self.input_shape = None
@@ -648,9 +677,9 @@ class Deconvolution:
       self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
     else:
       # He for rectifiers, Glorot for normalizers, else default
-      if self.activation_function in rectifiers:
+      if activation.lower() in rectifiers:
         self.initializer_fn = Key.INITIALIZER["he normal"]
-      elif self.activation_function in normalization:
+      elif activation.lower() in normalization:
         self.initializer_fn = Key.INITIALIZER["glorot normal"]
       else:
         self.initializer_fn = Key.INITIALIZER["default"]
@@ -668,11 +697,15 @@ class Deconvolution:
       fan_out_shape,
     )
     out_H = (H + kH) * sH - 1
-    out_W = (W + kW) * sW- 1
+    out_W = (W + kW) * sW - 1
 
     self.params["biases"] = jnp.zeros((self.channels, out_H, out_W))
+    
+    parametrics = {
+      name: self.initializer_fn((self.channels,), C_in * kH * kW, fan_out_shape) for name in self.activation_object.parameters
+    }
 
-    return self.params, (self.channels, out_H, out_W)
+    return self.params.update(parametrics), (self.channels, out_H, out_W)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if inputs.ndim != 4:
@@ -695,14 +728,21 @@ class Deconvolution:
               upscaled = upscaled.at[n,co,i*sH:i*sH+kH,j*sW:j*sW+kW].add(self.params["weights"][co,ci,:,:]*inputs[n,ci,i,j])
               
     WS = upscaled + params["biases"]
-    activated = self.activation_function(WS)
+    activated = self.activation_fn(WS, **params)
     return activated, WS
 
   def backward(self, params: dict, inputs: jnp.ndarray, upstream_error: jnp.ndarray, weighted_sums: jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     if inputs.ndim != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
-    d_WS = self.activation_derivative(upstream_error, weighted_sums)  # (N, C_out, H_out, W_out)
+    all_grads = self.activation_derivative_fn(upstream_error, weighted_sums, **params)
+    
+    param_gradients = {}
+    for name, gradient in all_grads.items():
+      if name != 'x':
+        param_gradients[name] = gradient  # (C_out,)
+    
+    d_WS = all_grads['x']  # (N, C_out, H_out, W_out)
 
     grad_bias = jnp.sum(d_WS, axis=(0, 2, 3))  # (C_out, H_out, W_out) → reduce to (C_out,)
 
@@ -764,8 +804,7 @@ class Deconvolution:
       stride=self.stride
     )
 
-    param_gradients = {"weights": grad_weights, "biases": grad_bias}
-    return upstream_gradient, param_gradients
+    return upstream_gradient, {"weights": grad_weights, "biases": grad_bias, **param_gradients}
 
 class Recurrent:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
@@ -823,15 +862,22 @@ class Recurrent:
     self.cells = cells
     self.name = name
 
-    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
-
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     self.initializer_fn = Key.INITIALIZER['default']
-    if activation in rectifiers:
+    if activation.lower() in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif activation in normalization:
+    elif activation.lower() in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -852,11 +898,16 @@ class Recurrent:
 
     params = {}
     for cell_index in range(self.cells):
+      parametrics ={
+        name: self.initializer_fn((features,), features, fan_out_shape[0]) for name in self.activation_object.parameters
+      }
+      
       params[f'cell_{cell_index}'] = {
         'input_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
         'carry_weights': self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
         'final_weights': self.initializer_fn((sequence_length * 2, sequence_length), features, fan_out_shape[0]),
-        'final_bias': jnp.zeros(sequence_length * 2)
+        'final_bias': jnp.zeros(sequence_length * 2),
+        **parametrics
       }
     return params, (len(self.output_sequence),sequence_length)
 
@@ -886,7 +937,7 @@ class Recurrent:
 
         merged = jnp.concatenate((weighted_carry, weighted_input)) + cell_params['final_bias']
 
-        output_carry = self.activation_fn(merged @ cell_params['final_weights'])
+        output_carry = self.activation_fn(merged @ cell_params['final_weights'], **cell_params)
         weighted_sums.append([
           merged, merged @ cell_params['final_weights']
           ])
@@ -920,7 +971,13 @@ class Recurrent:
 
         local_error = error[n, cell_index] + grad_carry
         
-        grads_z = self.activation_derivative_fn(local_error, WS)
+        all_grads = self.activation_derivative_fn(local_error, WS)
+        
+        for name, grad in all_grads.items():
+          if name != 'x' and name in cell_params:
+            grads[f'cell_{cell_index}'][name] = grad
+        
+        grads_z = all_grads['x']
         
         grads_weights = jnp.outer(final_input, grads_z)  # (in_features, out_features)
         grads_biases = jnp.sum(grads_z, axis=0)  # (out_features,)
@@ -1002,17 +1059,23 @@ class LSTM:
     self.cells = cells
     self.name = name
 
-    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
-
-    # final head activation (pointwise) and derivative signature same as your framework
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # initializer selection matching your Recurrent
     self.initializer_fn = Key.INITIALIZER['default']
-    if activation in rectifiers:
+    if activation.lower() in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif activation in normalization:
+    elif activation.lower() in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -1039,6 +1102,10 @@ class LSTM:
 
     params = {}
     for cell_index in range(self.cells):
+      parametrics = {
+        name: self.initializer_fn((features,), concat_size, features) for name in self.activation_object.parameters
+      }
+      
       params[f'cell_{cell_index}'] = {
         # elementwise multipliers (preserve length)
         'input_weights': self.initializer_fn((features,), features, features),
@@ -1057,7 +1124,9 @@ class LSTM:
         'candidate_bias': jnp.zeros((features,)),
 
         'final_weights': self.initializer_fn((concat_size, features), concat_size, features),
-        'final_bias': jnp.zeros((concat_size,))
+        'final_bias': jnp.zeros((concat_size,)),
+        
+        **parametrics
       }
     return params, (len(self.output_sequence),sequence_length)
 
@@ -1100,21 +1169,21 @@ class LSTM:
         z_g = jnp.dot(merged, cell_params['candidate_weights']) + cell_params['candidate_bias']
         z_o = jnp.dot(merged, cell_params['output_gate_weights']) + cell_params['output_gate_bias']
 
-        f_t = Key.ACTIVATION['sigmoid'](z_f)
-        i_t = Key.ACTIVATION['sigmoid'](z_i)
-        o_t = Key.ACTIVATION['sigmoid'](z_o)
-        g_t = Key.ACTIVATION['tanh'](z_g)
+        f_t = jax.nn.sigmoid(z_f)
+        i_t = jax.nn.sigmoid(z_i)
+        o_t = jax.nn.sigmoid(z_o)
+        g_t = jax.nn.tanh(z_g)
 
         # cell + hidden update (standard LSTM equations but using merged->gates)
         c_prev = c_t
         h_prev = h_t
 
         c_t = f_t * c_prev + i_t * g_t
-        h_t = o_t * Key.ACTIVATION['tanh'](c_t)
+        h_t = o_t * jax.nn.tanh(c_t)
 
         # final FC head (merged -> features) then activation_fn (pointwise)
         act_WS = jnp.dot(merged, cell_params['final_weights'])   # (features,)
-        output_carry = self.activation_fn(act_WS)
+        output_carry = self.activation_fn(act_WS, **cell_params)
 
         # stash all needed values for backward
         WS = {
@@ -1212,7 +1281,14 @@ class LSTM:
           d_y = jnp.zeros((features,))
 
         # grads_z corresponds to delta in feature space after activation
-        grads_z = self.activation_derivative_fn(d_y, act_WS)   # (features,)
+        all_grads = self.activation_derivative_fn(d_y, act_WS, **cell_params)   # (features,)
+        
+        for name, gradient in all_grads.items():
+          if name != 'x':
+            grads[cell_key][name] = gradient
+        
+        grads_z = all_grads['x']
+        
         # final_weights gradient
         grads[cell_key]['final_weights'] += jnp.outer(merged, grads_z)   # (2*features, features)
 
@@ -1222,7 +1298,7 @@ class LSTM:
         grads[cell_key]['final_bias'] += upstream_from_final
 
         # compute derivative wrt o, i, f, g using standard LSTM formulas
-        tanh_c = Key.ACTIVATION['tanh'](c_t)
+        tanh_c = jax.nn.tanh(c_t)
         # output gate
         do = dh_next * tanh_c
         do_raw = do * (o_t * (1.0 - o_t))   # σ'(z_o) with o_t
@@ -1333,16 +1409,23 @@ class GRU:
     self.cells = cells
     self.name = name
 
-    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
-
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # default init
     self.initializer_fn = Key.INITIALIZER['default']
-    if activation in rectifiers:
+    if activation.lower() in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif activation in normalization:
+    elif activation.lower() in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -1354,143 +1437,240 @@ class GRU:
     self.output_sequence = output_sequence
 
   def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
-    
-    features, sequence_length = fan_in_shape
+    sequence_length, features = fan_in_shape
+
     if self.input_sequence is None:
-      self.input_sequence = tuple([_ for _ in range(features)]) 
-      
+      self.input_sequence = tuple([_ for _ in range(features)])
     if self.output_sequence is None:
       self.output_sequence = tuple([_ for _ in range(self.cells)])
 
     params = {}
     for cell_index in range(self.cells):
+      parametrics = {}
+      for name in self.activation_object.parameters:
+        parametrics[name] = self.initializer_fn((features,), features, features)
+
       params[f'cell_{cell_index}'] = {
-        # reset gate
-        "W_r": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "U_r": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "b_r": jnp.zeros(sequence_length),
+        # reset gate weights: x @ W_r  and h_prev @ U_r
+        "W_r": self.initializer_fn((features, features), features, features),
+        "U_r": self.initializer_fn((features, features), features, features),
+        "b_r": jnp.zeros((features,)),
 
         # update gate
-        "W_z": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "U_z": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "b_z": jnp.zeros(sequence_length),
+        "W_z": self.initializer_fn((features, features), features, features),
+        "U_z": self.initializer_fn((features, features), features, features),
+        "b_z": jnp.zeros((features,)),
 
         # candidate hidden
-        "W_h": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "U_h": self.initializer_fn((sequence_length,), features, fan_out_shape[0]),
-        "b_h": jnp.zeros(sequence_length),
+        "W_h": self.initializer_fn((features, features), features, features),
+        "U_h": self.initializer_fn((features, features), features, features),
+        "b_h": jnp.zeros((features,)),
 
-        # final fully-connected layer before output
-        "final_weights": self.initializer_fn((sequence_length * 2, sequence_length), features, fan_out_shape[0]),
-        "final_bias": jnp.zeros(sequence_length * 2)
+        # final fully-connected layer before output (concat(h, x) -> features)
+        "final_weights": self.initializer_fn((features * 2, features), features, features),
+        "final_bias": jnp.zeros((features,)),
+
+        **parametrics
       }
-      
-    return params, (len(self.output_sequence),sequence_length)
+
+    # return params and output shape (len(output_sequence) used elsewhere), but keep consistent with prior API
+    return params, (len(self.output_sequence), features)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-    # inputs: (batch, seq_len, features)
     batches, seq_len, features = inputs.shape
     per_batch_output = []
     per_batch_WS = []
 
     for n in range(batches):
-      
-      h_t = jnp.zeros(features)
+      h_t = jnp.zeros((features,))   # hidden state (preserve-length)
       weighted_sums = []
       outputs = []
 
       for cell_index in range(self.cells):
         cell_params = params[f'cell_{cell_index}']
 
-        # pick input feature
-        x_t = jnp.zeros(features)
+        # input for this cell (or zeros if not in input_sequence)
         if cell_index in self.input_sequence:
           input_feature_idx = self.input_sequence.index(cell_index)
           x_t = inputs[n, input_feature_idx, :]
+        else:
+          x_t = jnp.zeros((features,))
 
-        # reset gate
-        r_t = jax.nn.sigmoid(x_t * cell_params["W_r"] + h_t * cell_params["U_r"] + cell_params["b_r"])
+        # Reset gate: r_t = sigmoid(xW_r + h_prev U_r + b_r)
+        pre_r = jnp.dot(x_t, cell_params["W_r"]) + jnp.dot(h_t, cell_params["U_r"]) + cell_params["b_r"]
+        r_t = jax.nn.sigmoid(pre_r)
 
-        # update gate
-        z_t = jax.nn.sigmoid(x_t * cell_params["W_z"] + h_t * cell_params["U_z"] + cell_params["b_z"])
+        # Update gate: z_t = sigmoid(xW_z + h_prev U_z + b_z)
+        pre_z = jnp.dot(x_t, cell_params["W_z"]) + jnp.dot(h_t, cell_params["U_z"]) + cell_params["b_z"]
+        z_t = jax.nn.sigmoid(pre_z)
 
-        # candidate hidden
-        h_hat = self.activation_fn(x_t * cell_params["W_h"] + (r_t * h_t) * cell_params["U_h"] + cell_params["b_h"])
+        # Candidate hidden: h_hat = activation(xW_h + (r_t * h_prev) U_h + b_h)
+        rh = r_t * h_t                            # elementwise
+        pre_h_hat = jnp.dot(x_t, cell_params["W_h"]) + jnp.dot(rh, cell_params["U_h"]) + cell_params["b_h"]
+        # support both callable activation function and activation object
+        h_hat = self.activation_fn(pre_h_hat, **cell_params) if callable(self.activation_fn) else self.activation_fn(pre_h_hat, **cell_params)
 
-        # final hidden state
-        h_t = (1 - z_t) * h_t + z_t * h_hat
+        # New hidden state
+        h_new = (1.0 - z_t) * h_t + z_t * h_hat
 
-        # fully connected before output
-        merged = jnp.concatenate((h_t, x_t)) + cell_params['final_bias']
-        output_carry = self.activation_fn(merged @ cell_params['final_weights'])
+        # Final head: concat(h_new, x_t) -> final_weights -> activation -> output
+        merged = jnp.concatenate((h_new, x_t))   # (2*features,)
+        act_preact = jnp.dot(merged, cell_params["final_weights"]) + cell_params["final_bias"]
+        output_carry = self.activation_fn(act_preact, **cell_params) if callable(self.activation_fn) else self.activation_fn(act_preact, **cell_params)
 
-        weighted_sums.append([r_t, z_t, h_hat, h_t, merged, merged @ cell_params['final_weights']])
+        # Save everything needed for backward
+        WS = {
+          "x_t": x_t,
+          "h_prev": h_t,
+          "pre_r": pre_r, "r_t": r_t,
+          "pre_z": pre_z, "z_t": z_t,
+          "pre_h_hat": pre_h_hat, "h_hat": h_hat,
+          "h_new": h_new,
+          "merged": merged, "act_preact": act_preact
+        }
+        weighted_sums.append(WS)
 
+        # If this cell is an output cell, collect output
         if cell_index in self.output_sequence:
           outputs.append(output_carry)
 
-      per_batch_output.append(outputs)
+        # advance hidden
+        h_t = h_new
+
+      per_batch_output.append(jnp.stack(outputs, axis=0) if len(outputs) > 0 else jnp.zeros((0, features)))
       per_batch_WS.append(weighted_sums)
 
-    return jnp.array(per_batch_output), per_batch_WS
+    return jnp.stack(per_batch_output, axis=0), per_batch_WS
 
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     batches, seq_len, features = inputs.shape
+
+    # init grads per cell
     grads = {k: {
-      "W_r": jnp.zeros_like(v["W_r"]), 
-      "U_r": jnp.zeros_like(v["U_r"]), 
+      "W_r": jnp.zeros_like(v["W_r"]),
+      "U_r": jnp.zeros_like(v["U_r"]),
       "b_r": jnp.zeros_like(v["b_r"]),
-      
-      "W_z": jnp.zeros_like(v["W_z"]), 
-      "U_z": jnp.zeros_like(v["U_z"]), 
+
+      "W_z": jnp.zeros_like(v["W_z"]),
+      "U_z": jnp.zeros_like(v["U_z"]),
       "b_z": jnp.zeros_like(v["b_z"]),
-      
-      "W_h": jnp.zeros_like(v["W_h"]), 
-      "U_h": jnp.zeros_like(v["U_h"]), 
+
+      "W_h": jnp.zeros_like(v["W_h"]),
+      "U_h": jnp.zeros_like(v["U_h"]),
       "b_h": jnp.zeros_like(v["b_h"]),
-      
+
       "final_weights": jnp.zeros_like(v["final_weights"]),
-      "final_bias":    jnp.zeros_like(v["final_bias"])
+      "final_bias": jnp.zeros_like(v["final_bias"])
     } for k, v in params.items()}
 
     input_grads = jnp.zeros_like(inputs)
 
+    # process each batch independently
     for n in range(batches):
-      
-      grad_h = jnp.zeros(features)
-      
+      dh_next = jnp.zeros((features,))   # gradient w.r.t. next hidden (in chain)
+      dc_unused = None                   # GRU has no cell state, placeholder
+
+      # iterate cells backward
       for cell_index in reversed(range(self.cells)):
-        cell_params = params[f'cell_{cell_index}']
-        r_t, z_t, h_hat, h_t, final_input, WS = weighted_sums[n][cell_index]
+        cell_key = f'cell_{cell_index}'
+        cell_params = params[cell_key]
+        WS = weighted_sums[n][cell_index]
 
-        # combine error + upstream
-        local_error = error[n, cell_index] + grad_h
+        # get forward cached values
+        x_t = WS["x_t"]
+        h_prev = WS["h_prev"]
+        pre_r, r_t = WS["pre_r"], WS["r_t"]
+        pre_z, z_t = WS["pre_z"], WS["z_t"]
+        pre_h_hat, h_hat = WS["pre_h_hat"], WS["h_hat"]
+        h_new = WS["h_new"]
+        merged = WS["merged"]
+        act_preact = WS["act_preact"]
 
-        # backprop through final fully-connected
-        grads_z = self.activation_derivative_fn(local_error, WS)
-        grads_weights = jnp.outer(final_input, grads_z)
-        grads_biases = jnp.sum(grads_z, axis=0)
-        upstream = grads_z @ cell_params['final_weights'].T
+        # error slice for this cell (if it's an output)
+        if cell_index in self.output_sequence:
+          k = self.output_sequence.index(cell_index)
+          d_out = error[n, k, :]
+        else:
+          d_out = jnp.zeros((features,))
 
-        grads[f'cell_{cell_index}']["final_weights"] += grads_weights
-        grads[f'cell_{cell_index}']["final_bias"] += grads_biases
+        # --- Backprop through final FC head ---
+        # derivative through activation at final head
+        d_act = self.activation_derivative_fn(d_out, act_preact, **cell_params)['x'] if callable(self.activation_derivative_fn) else self.activation_derivative_fn(d_out, act_preact, **cell_params)
+        grads[cell_key]["final_weights"] += jnp.outer(merged, d_act)
+        grads[cell_key]["final_bias"] += d_act
+        # upstream into merged (2*features,)
+        d_merged = jnp.dot(d_act, cell_params["final_weights"].T)  # (2*features,)
 
-        # split back to h_t and x_t contributions
-        grad_h = upstream[:features]
-        grad_x = upstream[features:]
+        # split merged grads into dh_new and dx contributions
+        d_h_from_final = d_merged[:features]
+        d_x_from_final = d_merged[features:]
 
+        # total gradient w.r.t. h_new includes dh_next from later cells (temporal) and final head
+        dh_total = d_h_from_final + dh_next
+
+        # --- GRU recurrence backprop ---
+        # h_new = (1 - z_t) * h_prev + z_t * h_hat
+        # contributions:
+        dh_hat = dh_total * z_t                   # (features,)
+        dz = dh_total * (h_hat - h_prev)          # (features,)
+        dh_prev_part = dh_total * (1.0 - z_t)     # part that flows to previous hidden directly
+
+        # backprop through h_hat = activation(pre_h_hat)
+        all_grads = self.activation_derivative_fn(dh_hat, pre_h_hat, **cell_params)
+        
+        for name, gradient in all_grads.items():
+          if name != 'x':   # 'x' is the gradient wrt pre_h_hat
+            if name in cell_params:
+              grads[cell_key][name] = gradient
+        
+        d_pre_h_hat = all_grads['x']
+        
+        # grads to W_h, U_h, b_h
+        grads[cell_key]["W_h"] += jnp.outer(x_t, d_pre_h_hat)
+        grads[cell_key]["U_h"] += jnp.outer(r_t * h_prev, d_pre_h_hat)
+        grads[cell_key]["b_h"] += d_pre_h_hat
+
+        # propagate to x and to (r * h_prev)
+        d_x = jnp.dot(d_pre_h_hat, cell_params["W_h"].T)   # from W_h path
+        d_rh = jnp.dot(d_pre_h_hat, cell_params["U_h"].T)  # gradient into elementwise (r * h_prev)
+
+        # d_rh contributes to r and h_prev:
+        d_r_from_hpath = d_rh * h_prev
+        d_hprev_from_hpath = d_rh * r_t
+
+        # --- reset gate r backprop: r = sigmoid(pre_r)
+        # pre_r receives contributions from both d_r_from_hpath and possibly elsewhere (here only from h_hat path)
+        d_pre_r = d_r_from_hpath * (r_t * (1.0 - r_t))   # sigmoid'
+        grads[cell_key]["W_r"] += jnp.outer(x_t, d_pre_r)
+        grads[cell_key]["U_r"] += jnp.outer(h_prev, d_pre_r)
+        grads[cell_key]["b_r"] += d_pre_r
+
+        # propagate to x and h_prev from reset gate path
+        d_x += jnp.dot(d_pre_r, cell_params["W_r"].T)
+        d_hprev_from_rpath = jnp.dot(d_pre_r, cell_params["U_r"].T)
+
+        # --- update gate z backprop: z = sigmoid(pre_z)
+        d_pre_z = dz * (z_t * (1.0 - z_t))
+        grads[cell_key]["W_z"] += jnp.outer(x_t, d_pre_z)
+        grads[cell_key]["U_z"] += jnp.outer(h_prev, d_pre_z)
+        grads[cell_key]["b_z"] += d_pre_z
+
+        d_x += jnp.dot(d_pre_z, cell_params["W_z"].T)
+        d_hprev_from_zpath = jnp.dot(d_pre_z, cell_params["U_z"].T)
+
+        # --- accumulate gradient wrt h_prev for passing to previous timestep
+        dh_prev = dh_prev_part + d_hprev_from_hpath + d_hprev_from_rpath + d_hprev_from_zpath
+
+        # --- input gradient: include contribution from final head dx_from_final and from gate/candidate paths (d_x)
+        total_dx = d_x + d_x_from_final
+
+        # write input gradient if this cell consumes input
         if cell_index in self.input_sequence:
-          input_feature_idx = self.input_sequence.index(cell_index)
-          
-          # print(input_grads)
-          # print(input_grads[n, input_feature_idx, :])
-          # print(grad_x)
-          # exit()
-          
-          input_grads = input_grads.at[n, input_feature_idx, :].add(grad_x)
+          input_idx = self.input_sequence.index(cell_index)
+          input_grads = input_grads.at[n, input_idx, :].add(total_dx)
 
-        # TODO: properly expand into r_t, z_t, and candidate grads
-        # (same structure as GRU math but with FCs)
+        # set dh_next for the previous cell (next iteration of reversed loop)
+        dh_next = dh_prev
 
     return input_grads, grads
 
@@ -1511,16 +1691,23 @@ class Attention:
     self.heads = heads
     self.name = name
 
-    # validate activation
-    assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
-    self.activation_fn = Key.ACTIVATION[activation.lower()]
-    self.activation_derivative_fn = Key.ACTIVATION_DERIVATIVE[activation.lower()]
+    if type(activation) == str:
+      assert activation in Key.ACTIVATION, f"Unknown activation: '{activation}'. Available: {list(Key.ACTIVATION.keys())}"
+      self.activation_fn = Key.ACTIVATION[activation.lower()].forward
+      self.activation_derivative_fn = Key.ACTIVATION[activation.lower()].backward
+      self.activation_object = Key.ACTIVATION[activation.lower()]
+    elif hasattr(activation, 'forward') and hasattr(activation, 'backward'):
+      self.activation_fn = activation.forward
+      self.activation_derivative_fn = activation.backward
+      self.activation_object = activation
+    else:
+      raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # initializer selection
     self.initializer_fn = Key.INITIALIZER['default']
-    if activation in rectifiers:
+    if activation.lower() in rectifiers:
       self.initializer_fn = Key.INITIALIZER['he normal']
-    elif activation in normalization:
+    elif activation.lower() in normalization:
       self.initializer_fn = Key.INITIALIZER['glorot normal']
 
     if 'initializer' in kwargs:
@@ -1552,8 +1739,12 @@ class Attention:
       "W_O": self.initializer_fn((sequence_length * self.heads, sequence_length), features, fan_out_shape[0]),
       "b_O": jnp.zeros(sequence_length)
     }
+    
+    parametrics = {
+      parameter_name: self.initializer_fn((sequence_length,), features, fan_out_shape[0]) for parameter_name in self.activation_object.parameters
+    }
 
-    return params, (features, sequence_length)
+    return params.update(parametrics), (features, sequence_length)
 
   def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batch_size, features, seq_len = inputs.shape
@@ -1586,7 +1777,7 @@ class Attention:
       
       # final FC projection (maps back to (S, F))
       merged = jax.vmap(lambda token: token @ params["final"]["W_O"] + params["final"]["b_O"])(concat_out)
-      out = self.activation_fn(merged)  # (S, F)
+      out = self.activation_fn(merged, **params)  # (S, F)
 
       per_batch_outputs.append(out)
       per_batch_WS.append((head_ws, concat_out, merged, out))
@@ -1622,7 +1813,15 @@ class Attention:
       head_ws, concat_out, merged, out = weighted_sums[n]
 
       # ---- backprop through final FC + activation ----
-      d_out = self.activation_derivative_fn(batch_error, merged)   # (S, F)
+      all_grads = self.activation_derivative_fn(batch_error, merged, **params)
+      
+      parametrics = {}
+      for name, grad in all_grads.items():
+        if name != "x":
+          parametrics[name] = grad
+      
+      d_out = all_grads['x']   # (S, F)
+      
       grads["final"]["W_O"] += jnp.einsum("bi,bj->ij", concat_out, d_out)                # (F*H, F)
       grads["final"]["b_O"] += jnp.sum(d_out, axis=0)              # (F,)
       d_concat = d_out @ params["final"]["W_O"].T                  # (S, F*H)
@@ -1667,9 +1866,9 @@ class Attention:
         d_input_total += dV @ head_params["W_V"].T
 
       # assign input grads for this batch
-      input_grads = input_grads.at[n].set(d_input_total)
+      upstream_grads = upstream_grads.at[n].set(d_input_total)
 
-    return input_grads, grads
+    return upstream_grads, grads.update(parametrics)
 
 # functional layers
 
@@ -1860,12 +2059,6 @@ class Operation:
     - Softsign
     - Sigmoid
     - Tanh
-    
-    Parametric functions
-    - ELU
-    - SELU
-    - PReLU
-    - SiLU
 
     Scaler functions
     - Standard Scaler
@@ -1876,8 +2069,9 @@ class Operation:
     
     if type(operation) == str:
       if operation in Key.ACTIVATION:
-        self.operation_fn = Key.ACTIVATION[operation.lower()]
-        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()]
+        self.operation_fn = Key.ACTIVATION[operation.lower()].forward
+        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()].backward
+        self.operation_object = Key.ACTIVATION[operation.lower()]
         
       if operation in Key.SCALER:
         self.operation_fn = Key.SCALER[operation.lower()]
@@ -1903,6 +2097,9 @@ class Operation:
     
     if self.operation_fn(jnp.zeros(fan_in_shape)).shape != fan_in_shape:
       raise SystemError(f"Operation layer '{self.name}' operation function does not preserve shape: {fan_in_shape} -> {self.operation_fn(jnp.zeros_like(fan_in_shape)).shape}")
+    
+    if hasattr(self.operation_object, "parameters"):
+      raise ValueError("Operation layer does not support parameterized operations.")
     
     return {}, fan_in_shape
   

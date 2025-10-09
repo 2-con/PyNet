@@ -1,17 +1,18 @@
 """
 Regression
 =====
-  Regression algorithms for PyNet
+  Regression algorithms for PyNet with some features from NetCore such as optimizers and losses. Advanced features such as callbacks or
+  validation sets are not supported in these models.
 -----
-Provides
+Provided Regression Models
 -----
-- Linear Regression
-- Polynomial Regression
-- Logistic Regression
-- Exponential Regression
-- Power Regression
-- Logarithmic Regression
-- Sinusoidal Regression (external model, does not follow PyNet API)
+- Linear
+- Polynomial
+- Logistic
+- Exponential
+- Sinusoidal (External Model)
+- Power
+- Logarithmic
 """
 
 import sys, os
@@ -67,16 +68,17 @@ class Linear:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -87,18 +89,18 @@ class Linear:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -109,7 +111,6 @@ class Linear:
     - binary cross entropy
     - sparse categorical crossentropy
     - hinge loss
-
     """
     
     self.optimizer      = optimizer.lower()
@@ -120,6 +121,7 @@ class Linear:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -184,7 +186,12 @@ class Linear:
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
-
+          
+          if self.regularization[0].lower() == "l2":
+            weight_gradient += 2 * self.regularization[1] * weight
+          elif self.regularization[0].lower() == "l1":
+            weight_gradient += self.regularization[1] * sgn(weight)
+          
           # Update weights
           param_id += 1
           neuron['weights'][weight_index] = Key.OPTIMIZER[self.optimizer](learning_rate, weight, weight_gradient, storage_1, storage_2, alpha=alpha, beta=beta, epsilon=epsilon, gamma=gamma, delta=delta, param_id=param_id, timestep=timestep)
@@ -216,7 +223,25 @@ class Linear:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss + regularized_loss
         
         timestep += 1
         
@@ -299,16 +324,17 @@ class Polynomial:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -319,18 +345,18 @@ class Polynomial:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -341,7 +367,6 @@ class Polynomial:
     - binary cross entropy
     - sparse categorical crossentropy
     - hinge loss
-
     """
     
     self.optimizer      = optimizer.lower()
@@ -352,6 +377,7 @@ class Polynomial:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -419,6 +445,11 @@ class Polynomial:
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
+            
+          if self.regularization[0].lower() == "l2":
+            weight_gradient += 2 * self.regularization[1] * weight
+          elif self.regularization[0].lower() == "l1":
+            weight_gradient += self.regularization[1] * sgn(weight)
 
           # Update weights
           param_id += 1
@@ -451,7 +482,16 @@ class Polynomial:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss
         
         timestep += 1
         
@@ -551,16 +591,17 @@ class Logistic:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -571,18 +612,18 @@ class Logistic:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -603,6 +644,7 @@ class Logistic:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -685,6 +727,11 @@ class Logistic:
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
+            
+          if self.regularization[0].lower() == "l2":
+            weight_gradient += 2 * self.regularization[1] * weight
+          elif self.regularization[0].lower() == "l1":
+            weight_gradient += self.regularization[1] * sgn(weight)
 
           # Update weights
           param_id += 1
@@ -717,7 +764,16 @@ class Logistic:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss
         
         timestep += 1
         
@@ -814,22 +870,20 @@ class Exponential:
       Compiles the model to be ready for training.
       the PyNet commpiler will automatically take care of hyperparameters and fine tuning under the hood
       unless explicitly defined
-      
-      Since exponential regressions tend to create exploding gradients, it is highly reccomended to use a low learning rate
-      or to use an adaptive optimizer
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -840,18 +894,18 @@ class Exponential:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -862,7 +916,6 @@ class Exponential:
     - binary cross entropy
     - sparse categorical crossentropy
     - hinge loss
-
     """
     
     self.optimizer      = optimizer.lower()
@@ -873,6 +926,7 @@ class Exponential:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -942,6 +996,11 @@ class Exponential:
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
+          
+          if self.regularization[0].lower() == "l2":
+            weight_gradient += 2 * self.regularization[1] * weight
+          elif self.regularization[0].lower() == "l1":
+            weight_gradient += self.regularization[1] * sgn(weight)
 
           # Update weights
           param_id += 1
@@ -984,7 +1043,16 @@ class Exponential:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss
         
         timestep += 1
         
@@ -1123,16 +1191,17 @@ class Power:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -1143,18 +1212,18 @@ class Power:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -1165,7 +1234,6 @@ class Power:
     - binary cross entropy
     - sparse categorical crossentropy
     - hinge loss
-
     """
     
     self.optimizer      = optimizer.lower()
@@ -1176,6 +1244,7 @@ class Power:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -1245,6 +1314,11 @@ class Power:
 
           if (self.optimizer != 'none') and ('fullgrad' not in self.experimental):
             weight_gradient /= batchsize
+          
+          if self.regularization[0].lower() == "l2":
+            weight_gradient += 2 * self.regularization[1] * weight
+          elif self.regularization[0].lower() == "l1":
+            weight_gradient += self.regularization[1] * sgn(weight)
 
           # Update weights
           param_id += 1
@@ -1287,7 +1361,16 @@ class Power:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss
         
         timestep += 1
         
@@ -1370,16 +1453,17 @@ class Logarithmic:
     -----
     Args
     -----
-    - optimizer                  (str)   : optimizer to use
-    - loss                       (str)   : loss function to use
-    - metrics                    (list)  : metrics to use
-    - learning_rate              (float) : learning rate to use
-    - epochs                     (int)   : number of epochs to train for
-    - (Optional) batchsize       (int)   : batch size, defaults to 1
-    - (Optional) initialization  (int)   : weight initialization
-    - (Optional) experimental    (str)   : experimental settings to use
-    - (optional) verbose         (int)   : whether to show anything during training
-    - (optional) logging         (int)   : how often to show training stats
+    - optimizer                  (str)                : optimizer to use
+    - loss                       (str)                : loss function to use
+    - metrics                    (list)               : metrics to use
+    - learning_rate              (float)              : learning rate to use
+    - epochs                     (int)                : number of epochs to train for
+    - (Optional) batchsize       (int)                : batch size, defaults to 1
+    - (Optional) initialization  (int)                : weight initialization
+    - (optional) regularization  (tuple[str, float])  : regularization type and lambda value, e.g. ('l2', 0.01)
+    - (Optional) experimental    (str)                : experimental settings to use
+    - (optional) verbose         (int)                : whether to show anything during training
+    - (optional) logging         (int)                : how often to show training stats
 
     Optimizer hyperparameters
     -----
@@ -1390,18 +1474,18 @@ class Logarithmic:
     - (Optional) delta    (float)
     -----
     Optimizers
-    - ADAM        (Adaptive Moment Estimation)
-    - RMSprop     (Root Mean Square Propagation)
+    - ADAM
+    - RMSprop
     - Adagrad
     - Amsgrad
     - Adadelta
     - Gradclip    (Gradient Clipping)
     - Adamax
     - SGNDescent  (Sign Gradient Descent)
-    - Default     (PyNet descent)
+    - Default
     - Variational Momentum
     - Momentum
-    - None        (Gradient Descent)
+    - None
 
     Losses
     - mean squared error
@@ -1412,7 +1496,6 @@ class Logarithmic:
     - binary cross entropy
     - sparse categorical crossentropy
     - hinge loss
-
     """
     
     self.optimizer      = optimizer.lower()
@@ -1423,6 +1506,7 @@ class Logarithmic:
     self.experimental   = kwargs.get('experimental', [])
     self.verbose        = kwargs.get('verbose', 0)
     self.logging        = kwargs.get('logging', 1)
+    self.regularization = kwargs.get('regularization', [None, 0.0])
 
     self.alpha    = kwargs.get('alpha', None) # momentum decay
     self.beta     = kwargs.get('beta', None)
@@ -1529,7 +1613,16 @@ class Logarithmic:
           activations = self.predict(features[base_index + batch_index])
           errors.append(Backpropagate(activations, targets[base_index + batch_index]))
           
-          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations)
+          regularized_loss = 0.0
+          
+          for neuron in self.neurons:
+            for weight in neuron['weights']:
+              if self.regularization[0].lower() == 'l2':
+                regularized_loss += self.regularization[1] * (weight ** 2)
+              elif self.regularization[0].lower() == 'l1':
+                regularized_loss += self.regularization[1] * abs(weight)
+          
+          epoch_loss += Key.LOSS[self.loss](targets[base_index + batch_index], activations) + regularized_loss
         
         timestep += 1
         

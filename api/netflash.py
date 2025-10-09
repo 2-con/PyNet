@@ -233,7 +233,7 @@ class Sequential:
 
     self.layers.append(layer)
 
-  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list, validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, *args, **kwargs):
+  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list=[], validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, *args, **kwargs):
     """
     Compile
     -----
@@ -242,15 +242,63 @@ class Sequential:
     -----
     Args
     -----
-    - input_shape   (tuple[int, ...]) : shape of the input data, include channels for image data and features for tabular data.
-    - loss          (str)             : loss function to use
-    - learning_rate (float)           : learning rate to use
-    - epochs        (int)             : number of epochs to train for
-    - metrics       (list)            : metrics to use
-    - (Optional) batch_size    (int)  : batch size to use
-    - (Optional) verbose       (int)  : verbosity level
-    - (Optional) logging       (int)  : logging level
-    - (Optional) callbacks     (list) : logging level
+    - input_shape           (tuple[int, ...])               : shape of the input data, include channels for image data and features for tabular data.
+    - loss                  (str)                           : loss function to use
+    - learning_rate         (float)                         : learning rate to use
+    - epochs                (int)                           : number of epochs to train for
+    - (Optional) metrics    (list)                          : metrics to use
+    - (Optional) batch_size (int)                           : batch size to use
+    - (Optional) verbose    (int)                           : verbosity level
+    - (Optional) logging    (int)                           : logging level
+    - (Optional) callbacks  (core.flash.callback instance)  : call a custom callback class during training with access to all local variables, read more in the documentation.
+    - (Optional) validation_split (float)               : fraction of the data to use for validation, must be between [0, 1). Default is 0 (no validation).
+    - (Optional) regularization (tuple[str, float]) : type of regularization to use, position 0 is the type ("L1" or "L2"), position 1 is the lambda value. Default is None (no regularization).
+    
+    Verbosity Levels
+    -----
+    - 0 : None
+    - 1 : Progress bar of the whole training process
+    - 2 : Progress bar of each epoch
+    - 3 : (Numerical output) Loss of each epoch
+    - 4 : (Numerical output) Loss and ∆Loss
+    - 5 : (Numerical output) Loss, ∆Loss and the Validation Loss
+    - 6 : (Numerical output) Loss, ∆Loss, Validation Loss and ∆Validation Loss
+    
+    Optimizers
+    -----
+    - Amsgrad
+    - Default
+    - Gradclip
+    - SGND
+    - Momentum
+    - RMSprop
+    - Adagrad
+    - Novograd
+    - ADAM
+    - Adadelta
+    - Adamax
+    - Rprop
+
+    Losses
+    -----
+    - Mean Squared Error
+    - Root Mean Squared Error
+    - Mean Abseloute Error
+    - Total Squared Error
+    - Total Abseloute Error
+    - L1 Loss
+    - Categorical Crossentropy
+    - Sparse Categorical Crossentropy
+    - Binary Cross Entropy
+
+    Metrics
+    -----
+    - Accuracy
+    - Precision
+    - Recall
+    - F1 Score
+    - ROC AUC
+    - R2 Score
     """
     self.input_shape = input_shape
     self.learning_rate = learning_rate
@@ -367,6 +415,16 @@ class Sequential:
     
     self.callback = kwargs.get('callback', Callback)
     
+    #############################################################################################
+    #                                     Regularization                                        #
+    #############################################################################################
+    
+    self.regularization = kwargs.get('regularization', [None, 0])
+    if self.regularization[0] not in (None, "L1", "L2"):
+      raise ValueError("regularization type must be either None, 'L1' or 'L2'")
+    if type(self.regularization[1]) not in (int, float) or self.regularization[1] < 0:
+      raise ValueError("regularization lambda must be a non-negative number")
+    
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
     Fit
@@ -426,7 +484,7 @@ class Sequential:
     def step(
       layers_tuple:tuple, backward_func_tuple:tuple,
       error:jnp.ndarray, parameters_pytree:dict, opt_state:dict, activations:jnp.ndarray, weighted_sums:jnp.ndarray, 
-      timestep:int, optimizer_hyperparams:dict, learning_rate) -> tuple[dict, dict]:
+      timestep:int, optimizer_hyperparams:dict, learning_rate:float, regularization_lambda:float, regularization_type:str) -> tuple[dict, dict]:
       
       for layer_index in reversed(range(len(layers_tuple))):
         layer = self.layers[layer_index]
@@ -434,6 +492,19 @@ class Sequential:
         layer_params = parameters_pytree.get(f'layer_{layer_index}', {})
         
         error, gradients = backward_func_tuple[layer_index](layer_params, activations[layer_index], error, weighted_sums[layer_index])
+        
+        for param_name, param_value in layer_params.items():
+          if param_name in ('bias', 'biases'):
+            continue
+          
+          if regularization_type == "L2":
+            gradients[param_name] += 2 * regularization_lambda * param_value
+          
+          elif regularization_type == "L1":
+            gradients[param_name] += regularization_lambda * jnp.sign(param_value)
+          
+          else:
+            continue
         
         if type(layer) in (Flatten, MaxPooling, MeanPooling, Operation, Dropout, Reshape):
           # this is just to skip layers that don't have parameters
@@ -469,33 +540,50 @@ class Sequential:
           opt_state[f'layer_{layer_index}'] = new_opt_state
           
         elif type(layer) in (Dense, Convolution, Deconvolution, Localunit):
-          layer_params_weights, opt_state[f'layer_{layer_index}']['weights'] = self.optimizer(
-            learning_rate,
-            layer_params['weights'],
-            gradients['weights'],
-            opt_state[f'layer_{layer_index}']['weights'],
-            timestep=timestep,
-            **optimizer_hyperparams
-          )
           
-          layer_params_biases, opt_state[f'layer_{layer_index}']['biases'] = self.optimizer(
-            learning_rate,
-            layer_params['biases'],
-            gradients['biases'],
-            opt_state[f'layer_{layer_index}']['biases'],
-            timestep=timestep,
-            **optimizer_hyperparams
-          )
+          updated_params = {}
+          for name, value in layer_params.items():
+            updated_param_value, opt_state[f'layer_{layer_index}'][name] = self.optimizer(
+              learning_rate,
+              value,
+              gradients[name],
+              opt_state[f'layer_{layer_index}'][name],
+              timestep=timestep,
+              **optimizer_hyperparams
+            )
+            
+            updated_params[name] = updated_param_value
         
-          parameters_pytree[f'layer_{layer_index}'] = {
-            'weights': layer_params_weights,
-            'biases': layer_params_biases
-          }
+          parameters_pytree[f'layer_{layer_index}'] = updated_params
         
         else:
           raise NotImplementedError(f"Backpropagation and update systems are not implemented for layer of type \"{type(layer).__name__}\"")
         
       return parameters_pytree, opt_state
+    
+    @jax.jit
+    def forward_loss(y_true, y_pred, regularization_lambda, regularization_type, parameters_pytree):
+      emperical_loss = self.loss_function(y_true, y_pred)
+      
+      regularization_penalty = 0.0
+      
+      for _, parameters in parameters_pytree.items():
+        for param_name, param_value in parameters.items():
+          if param_name in ('bias', 'biases'):
+            continue
+          
+          if regularization_type == "L2":
+            regularization_penalty += jnp.sum(jnp.square(param_value))
+          elif regularization_type == "L1":
+            regularization_penalty += jnp.sum(jnp.abs(param_value))
+          else:
+            continue
+          
+      return emperical_loss + regularization_lambda * regularization_penalty
+    
+    @jax.jit
+    def backward_loss(y_true, y_pred):
+      return self.loss_derivative(y_true, y_pred)
     
     #############################################################################################
     #                                        Variables                                          #
@@ -517,8 +605,6 @@ class Sequential:
     backward_func_tuple = tuple(layer.backward for layer in self.layers)
     learning_rate = jnp.float32(self.learning_rate)
     
-    # self.loss_derivative = lambda y_true, y_pred: y_true - y_pred
-    
     callback = self.callback()
     callback.initialization(**locals())
     
@@ -535,26 +621,23 @@ class Sequential:
         if base_index + self.batchsize > len(features):
           break
         
-        key = jax.random.PRNGKey(random.randint(0, 2**32))  
+        key = jax.random.PRNGKey(random.randint(0, 2**32))
+        
+        shuffled_indices = jax.random.permutation(key, features.shape[0])
 
-        num_samples = features.shape[0]
-        shuffled_indices = jax.random.permutation(key, num_samples)
-
-        randomized_features = features[shuffled_indices]
-        randomized_targets = targets[shuffled_indices]
-
-        batch_features = randomized_features[base_index : base_index + self.batchsize]
-        batch_targets = randomized_targets[base_index : base_index + self.batchsize]
+        batch_features = features[shuffled_indices][base_index : base_index + self.batchsize]
+        batch_targets = targets[shuffled_indices][base_index : base_index + self.batchsize]
+        
+        # actual training method
         
         activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
-
-        epoch_loss += self.loss_function(batch_targets, activations_and_weighted_sums['activations'][-1])
-        initial_error = self.loss_derivative(batch_targets, activations_and_weighted_sums['activations'][-1])
+        epoch_loss += forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.regularization[1], self.regularization[0], self.params_pytree)
+        initial_error = backward_loss(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         callback.before_update(**locals())
         
         timestep += 1
-        current_params, current_opt_state = update_step(
+        current_params, current_opt_state = step(
           tuple(self.layers),
           backward_func_tuple,
           initial_error,  
@@ -564,7 +647,9 @@ class Sequential:
           activations_and_weighted_sums['weighted_sums'],
           timestep,
           self.optimizer_hyperparams,
-          learning_rate
+          learning_rate,
+          self.regularization[1],
+          self.regularization[0]
         )
 
         callback.after_update(**locals())
@@ -579,25 +664,32 @@ class Sequential:
       
       self.error_logs.append(epoch_loss)
       self.validation_error_logs.append(validation_loss) if len(validation_features) > 0 else do_nothing()
-      
+          
       ############ post training
       
       callback.after_epoch(**locals())
+      
+      for layer_number, parameters in self.params_pytree.items():
+        for param_name, param_value in parameters.items():
+          if jnp.isnan(param_value).any():
+            raise ValueError(f"NaN detected in the {param_name} of layer {layer_number}. Training halted.")
+          if jnp.isinf(param_value).any():
+            raise ValueError(f"Infinity detected in the {param_name} of layer {layer_number}. Training halted.")
 
       if epoch % self.logging == 0 and self.verbose >= 2:
         
         prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{self.epochs-1} ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
         pad                 = ' ' * ( len(f"Epoch {self.epochs}/{self.epochs-1} (100.0%)") - len(prefix))
         suffix              = f" ┃ Loss: {str(epoch_loss):22}"
-        rate                = f" ┃ ROC: {str(epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0):23}"
+        rate                = f" ┃ ∆Loss: {str(epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0):23}"
         
         if len(validation_features) > 0:
           validation_suffix = f" ┃ Validation: {str(validation_loss):22}"
-          validation_rate   = f" ┃ VROC: {validation_loss - self.validation_error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
+          validation_rate   = f" ┃ ∆Validation: {validation_loss - self.validation_error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
         
         else:
           validation_suffix = f" ┃ Validation: {str('Unavailable'):12}"
-          validation_rate   = f" ┃ VROC: Unavailable"
+          validation_rate   = f" ┃ ∆Validation: Unavailable"
         
         if self.verbose == 3:
           print(prefix + pad + suffix)
