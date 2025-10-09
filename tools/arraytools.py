@@ -5,7 +5,7 @@ A collection of tools for working with arrays, mainly 1D and 2D arrays
 """
   
 import random
-import math
+import typing
 
 def correlate(matrix, kernel):
   """
@@ -374,15 +374,11 @@ def shape(input):
   """
   Shape
   -----
-    Returns the shape of an array, caps at 2D arrays
+    Returns the shape of an array
   -----
   Args
   -----
-  input (2D array) : the array to count
-  
-  Returns
-  -----
-  (X size, Y size)
+  input (ndim array) : the array to count
   """
   def recursive(input_tensor):
     if input_tensor is None:
@@ -407,49 +403,6 @@ def shape(input):
 
   return recursive(input)
 
-def size(input):
-  """
-  Size
-  -----
-    Returns the quantity of elements in a 2D array
-  -----
-  Args
-  -----
-  input (2D array) : the array to count
-  
-  Returns
-  -----
-    Integer
-  """
-  return len(flatten(input))
-
-def clear(input, **kwargs):
-  """
-  Clear
-  -----
-    Clears a 1D or a 2D array
-  -----
-  Args
-  -----
-  input (1D or 2D array) : the array to clear
-  
-  Returns
-  -----
-    1D / 2D array
-  """
-  
-  value = kwargs.get('value', 0)
-  
-  for i in range(len(input)):
-    
-    try:
-      for j in range(len(input[i])):
-        input[i][j] = value
-    except:
-      input[i] = value
-
-  return input
-
 def mirror(input, axis:str):
   """
   Mirror
@@ -473,3 +426,23 @@ def mirror(input, axis:str):
 
   else:
     raise ValueError("axis must be 'X' or 'Y'")
+
+def distance(a, b, l:int):
+  """
+  Distance
+  -----
+    Returns the distance between two points in a l-dimensional space. 
+  -----
+  Args
+  -----
+  a (list) : the first point
+  b (list) : the second point
+  l (int)  : the dimension of the space
+  """
+  if len(a) != len(b):
+    raise ValueError("a and b must be the same length")
+  
+  if l <= 0:
+    raise ValueError("L must be positive")
+  
+  return sum((x-y)**l for x,y in zip(a,b))**(1/l)

@@ -16,7 +16,7 @@ Provides
 
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from tools.arraytools import shape, transpose
+from tools.arraytools import shape, transpose, distance
 from core.vanilla.loss import Entropy, Gini_impurity
 from core.vanilla.datafield import Node as n
 from core.vanilla.datafield import Datacontainer as dc
@@ -48,7 +48,7 @@ class KNN:
     """
     self.is_compiled = False
     
-  def compile(self, neighbors):
+  def compile(self, neighbors:int, distance_metric:int):
     """
     Compile
     -----
@@ -56,10 +56,12 @@ class KNN:
     -----
     Args
     -----
-    - neighbors (int) : the number of neighbors to consider before classifying
+    - neighbors       (int) : the number of neighbors to consider before classifying
+    - distance_metric (int) : the L-Dimention measurement to use. 1 for L1 (manhattan), 2 for L2 (euclidian)
     """
     self.is_compiled = True
     self.neighbors = neighbors
+    self.ldim = distance_metric
     
   def fit(self, features, labels):
     """
@@ -100,7 +102,7 @@ class KNN:
       
       else: # calculate the L1 distance between the point and the feature
         
-        distances.append( sum(abs(a - b) for a, b in zip(feature, point)) )
+        distances.append( distance(point, feature, self.ldim) )
         
     # sort the distances and get the indices of the k-nearest neighbors
     indices = sorted(range(len(distances)), key=lambda i: distances[i])[:self.neighbors]
@@ -354,7 +356,7 @@ class RandomForest:
     """
     Random Forest
     -----
-      Predicts the class of a point based on a decision tree
+      Predicts the class of a point based on a random forest. This model is an ensemble of decision trees.
     """
     self.is_compiled = False
     self.is_trained = False
@@ -534,7 +536,7 @@ class NaiveBayes:
     """
     Naive Bayes
     -----
-      Predicts the class of a point based using bayes' theorem assuming the data is independent of each other, hence the name, 'Naive Bayes'.
+      Predicts the class of a point based using bayes's theorem assuming the data is independent of each other.
     """
     self.is_compiled = False
     self.is_trained = False
@@ -883,7 +885,8 @@ class MSVM:
     """
     Multiclass Support Vector Machine
     -----
-      Predicts the class of a point based on a boundary. Works by using multiple SVMs to classify the data.
+      Predicts the class of a point based on a boundary. Works by using multiple SVMs to classify the data using the
+      OvA algorithm.
     """
     self.alphas = []
     self.b = 0
