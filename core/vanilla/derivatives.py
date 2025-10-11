@@ -2,7 +2,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from system.defaults import *
 import math
-import core.vanilla.activation as Activation
+import core.vanilla.activations as Activation
 from tools.math import sgn
 
 # loss functions

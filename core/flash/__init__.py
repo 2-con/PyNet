@@ -1,15 +1,10 @@
-"""
-test
-"""
-
-from . import activation
-from . import derivative
-from . import encoder
-from . import initializer
+from . import activations
+from . import encoders
+from . import initializers
 from . import layers
-from . import loss
-from . import metric
-from . import optimizer
-from . import scaler
+from . import losses
+from . import metrics
+from . import optimizers
+from . import scalers
 
-__all__ = ["activation", "derivative", "encoder", "initializer", "layers", "loss", "metric", "optimizer", "scaler"]
+__all__ = ["activations", "derivative", "encoders", "initializers", "layers", "losses", "metrics", "optimizers", "scalers"]

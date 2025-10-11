@@ -43,7 +43,7 @@ def Accuracy(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   # For classification, total samples is usually the first dimension
   total = y_true.shape[0] if y_true.ndim > 0 else 1 
 
-  return jnp.where(total != 0, (correct / total) * 100.0, jnp.array(0.0))
+  return jnp.where(total != 0, correct / total, jnp.array(0.0))
 
 def Precision(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """
@@ -83,7 +83,7 @@ def Precision(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   false_positive = jnp.sum((y_true_binary == 0) & (y_pred_binary == 1))
 
   denominator = true_positive + false_positive
-  return jnp.where(denominator != 0, (true_positive / denominator) * 100.0, jnp.array(0.0))
+  return jnp.where(denominator != 0, true_positive / denominator, jnp.array(0.0))
 
 def Recall(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """
@@ -123,7 +123,7 @@ def Recall(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   false_negative = jnp.sum((y_true_binary == 1) & (y_pred_binary == 0))
 
   denominator = true_positive + false_negative
-  return jnp.where(denominator != 0, (true_positive / denominator) * 100.0, jnp.array(0.0))
+  return jnp.where(denominator != 0, true_positive / denominator, jnp.array(0.0))
 
 def F1_score(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
   """

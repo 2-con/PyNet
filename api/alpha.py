@@ -17,9 +17,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import random
 
-from core.vanilla.activation import ReLU
-from core.vanilla.derivative import ReLU_derivative
-from core.vanilla.loss import Mean_squared_error as mse
+from core.vanilla.activations import ReLU
+from core.vanilla.derivatives import ReLU_derivative
+from core.vanilla.losses import Mean_squared_error as mse
 
 ################################################################################################
 #                                           Main code                                          #

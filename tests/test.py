@@ -10,7 +10,7 @@ import time
 import math
 import random
 import numpy as np
-from core.vanilla.encoder import OneHotEncode
+from core.vanilla.encoders import OneHotEncode
 from tools.visual import display_boundary
 
 start_time = time.perf_counter()

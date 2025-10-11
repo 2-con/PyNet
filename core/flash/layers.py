@@ -7,11 +7,10 @@ import typing
 import random
 
 from system.config import *
-import core.flash.activation as activation
-import core.flash.initializer as initializer
-import core.flash.derivative as derivative
-import core.flash.scaler as scaler
-import core.flash.encoder as encoder
+import core.flash.activations as activations
+import core.flash.initializers as initializers
+import core.flash.scalers as scalers
+import core.flash.encoders as encoders
 from core.vanilla.utility import do_nothing
 
 class Key:
@@ -19,91 +18,60 @@ class Key:
   ACTIVATION = {
     
     # normalization functions
-    "sigmoid": activation.Sigmoid(),
-    "tanh": activation.Tanh(),
-    "binary step": activation.Binary_step(),
-    "softsign": activation.Softsign(),
-    "softmax": activation.Softmax(),
+    "sigmoid": activations.Sigmoid(),
+    "tanh": activations.Tanh(),
+    "binary step": activations.Binary_step(),
+    "softsign": activations.Softsign(),
+    "softmax": activations.Softmax(),
     
     # rectifiers
-    "relu": activation.ReLU(),
-    "softplus": activation.Softplus(),
-    "mish": activation.Mish(),
-    "swish": activation.Swish(),
-    "leaky relu": activation.Leaky_ReLU(),
-    "gelu": activation.GELU(),
-    "identity": activation.Linear(),
-    "reeu": activation.ReEU(),
-    "retanh": activation.ReTanh(),
+    "relu": activations.ReLU(),
+    "softplus": activations.Softplus(),
+    "mish": activations.Mish(),
+    "swish": activations.Swish(),
+    "leaky relu": activations.Leaky_ReLU(),
+    "gelu": activations.GELU(),
+    "identity": activations.Linear(),
+    "reeu": activations.ReEU(),
+    "retanh": activations.ReTanh(),
     
     # parametric functions
-    'elu': activation.ELU(),
-    "selu": activation.SELU(),
-    "prelu": activation.PReLU(),
-    "silu": activation.SiLU(),
+    'elu': activations.ELU(),
+    "selu": activations.SELU(),
+    "prelu": activations.PReLU(),
+    "silu": activations.SiLU(),
   }
   
   SCALER = {
-    "standard scaler": scaler.Standard_Scaler,
-    "min max scaler": scaler.Min_Max_Scaler,
-    "max abs scaler": scaler.Max_Abs_Scaler,
-    "robust scaler": scaler.Robust_Scaler
-  }
-  
-  SCALER_DERIVATIVE = {
-    "standard scaler": derivative.Standard_Scaler_Derivative,
-    "min max scaler": derivative.Min_Max_Scaler_derivative,
-    "max abs scaler": derivative.Max_Abs_Scaler_derivative,
-    "robust scaler": derivative.Robust_Scaler_derivative,
+    "standard scaler": scalers.Standard_Scaler,
+    "min max scaler": scalers.Min_Max_Scaler,
+    "max abs scaler": scalers.Max_Abs_Scaler,
+    "robust scaler": scalers.Robust_Scaler
   }
   
   ENCODER = {
-    "sinusoidal positional": encoder.SinusoidalEmbedding
+    "sinusoidal positional": encoders.SinusoidalEmbedding,
+    "one hot": encoders.OneHot,
+    "ordinal": encoders.OrdinalEncoder
   }
   
   ENCODER_DERIVATIVE = {
-    "sinusoidal positional": lambda x: x
+    "sinusoidal positional": lambda x: x,
+    "one hot": lambda x: x,
+    "ordinal": lambda x: x
   }
   
   INITIALIZER = {
-    "glorot uniform": initializer.Glorot_uniform,
-    "glorot normal": initializer.Glorot_normal,
-    "he uniform": initializer.He_uniform,
-    "he normal": initializer.He_normal,
-    "lecun uniform": initializer.Lecun_uniform,
-    "lecun normal": initializer.Lecun_normal,
-    "xavier uniform in": initializer.Xavier_uniform_in,
-    "xavier uniform out": initializer.Xavier_uniform_out,
-    "default": initializer.Default
+    "glorot uniform": initializers.Glorot_uniform,
+    "glorot normal": initializers.Glorot_normal,
+    "he uniform": initializers.He_uniform,
+    "he normal": initializers.He_normal,
+    "lecun uniform": initializers.Lecun_uniform,
+    "lecun normal": initializers.Lecun_normal,
+    "xavier uniform in": initializers.Xavier_uniform_in,
+    "xavier uniform out": initializers.Xavier_uniform_out,
+    "default": initializers.Default
   }
-  
-  
-  
-"""
-JNP shapes are determined by (Y,X) or (Z,Y,X)
-its the opposite of NetCore.
-
-input format
-  (batch_size, input_size) (Y,X)
-  
-output format
-  (batch_size, output_size) (Y,X)
-  
-=====
-calibrate
-
-returns:
-  parameters, output_shape
-"""
-
-""" Todo:
-
-impliment parametric stuff in here,
-instead of **KWARGS make it *ARGS so that the user can pass in anything they want
-
-convert the forward and backward func into class methods to make it easier to integrate parametric functions
-
-"""
 
 class Dense:
   def __init__(self, neurons:int, activation, name:str="Null", *args, **kwargs):
@@ -2070,12 +2038,12 @@ class Operation:
     if type(operation) == str:
       if operation in Key.ACTIVATION:
         self.operation_fn = Key.ACTIVATION[operation.lower()].forward
-        self.operation_derivative_fn = Key.ACTIVATION_DERIVATIVE[operation.lower()].backward
+        self.operation_derivative_fn = Key.ACTIVATION[operation.lower()].backward
         self.operation_object = Key.ACTIVATION[operation.lower()]
         
       if operation in Key.SCALER:
-        self.operation_fn = Key.SCALER[operation.lower()]
-        self.operation_derivative_fn = Key.SCALER_DERIVATIVE[operation.lower()]
+        self.operation_fn = Key.SCALER[operation.lower()].forward
+        self.operation_derivative_fn = Key.SCALER[operation.lower()].backward
         
       if operation in Key.ENCODER:
         self.operation_fn = Key.ENCODER[operation.lower()]

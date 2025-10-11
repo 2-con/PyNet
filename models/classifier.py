@@ -17,9 +17,9 @@ Provides
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools.arraytools import shape, transpose, distance
-from core.vanilla.loss import Entropy, Gini_impurity
-from core.vanilla.datafield import Node as n
-from core.vanilla.datafield import Datacontainer as dc
+from core.vanilla.losses import Entropy, Gini_impurity
+from core.vanilla.datafields import Node as n
+from core.vanilla.datafields import Datacontainer as dc
 import random
 import math
 
@@ -755,12 +755,12 @@ class SVM:
     -----
     Args
     -----
-    - kernel                    (core.vanilla.kernel object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
-    - maximum_iterations        (int)                         : the maximum number of iterations to train the model for to prevent infinite loops
-    - learning_rate             (float)                       : the learning rate to use when training the model
-    - (Optional) c              (float)                       : the regularization parameter
-    - (Optional) l2lambda       (float)                       : the L2 regularization parameter
-    - (Optional) return_scores  (bool)                        : if True, the predict method will return the score instead of the class, defaults to False
+    - kernel                    (core.vanilla.kernels object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
+    - maximum_iterations        (int)                          : the maximum number of iterations to train the model for to prevent infinite loops
+    - learning_rate             (float)                        : the learning rate to use when training the model
+    - (Optional) c              (float)                        : the regularization parameter
+    - (Optional) l2lambda       (float)                        : the L2 regularization parameter
+    - (Optional) return_scores  (bool)                         : if True, the predict method will return the score instead of the class, defaults to False
     """
     self.kernel = kernel
     self.learning_rate = learning_rate
@@ -902,12 +902,12 @@ class MSVM:
     -----
     Args
     -----
-    - kernel                    (core.vanilla.kernel object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
-    - maximum_iterations        (int)                         : the maximum number of iterations to train the model for to prevent infinite loops
-    - learning_rate             (float)                       : the learning rate to use when training the model
-    - (Optional) c              (float)                       : the regularization parameter
-    - (Optional) l2lambda       (float)                       : the L2 regularization parameter
-    - (Optional) return_scores  (bool)                        : if True, the predict method will return the score instead of the class, defaults to False
+    - kernel                    (core.vanilla.kernels object)  : must be a core.vanilla.kernel object, if not, make sure it contains a __call__ method
+    - maximum_iterations        (int)                          : the maximum number of iterations to train the model for to prevent infinite loops
+    - learning_rate             (float)                        : the learning rate to use when training the model
+    - (Optional) c              (float)                        : the regularization parameter
+    - (Optional) l2lambda       (float)                        : the L2 regularization parameter
+    - (Optional) return_scores  (bool)                         : if True, the predict method will return the score instead of the class, defaults to False
     """
     # might just implement this later, for now stick to OvA
     # - type                (str)     : the type of multiclass SVM to use, must be 'OvO' (one-vs-one) or 'OvA' (one-vs-all)

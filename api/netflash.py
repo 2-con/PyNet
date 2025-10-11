@@ -6,9 +6,24 @@ NetFlash API
 -----
 Provides
 -----
+  (Learnable layers)
+  1. Convolution
+  2. Deconvolution
+  3. Dense
+  4. Localunit
+  5. Multiheaded self-attention
 
-  N/A
-
+  (Utility layers)
+  1. Maxpooling
+  2. Meanpooling
+  3. Flatten
+  4. Reshape
+  5. Operation (normalization and activation functions)
+  
+  (Recurrent units)
+  1. Recurrent
+  2. LSTM
+  3. GRU
 """
 #######################################################################################################
 #                                    File Information and Handling                                    #
@@ -39,9 +54,9 @@ import jax
 import jax.numpy as jnp
 
 from tools import utility
-from core.flash import loss, optimizer, metric, derivative
+from core.flash import losses, metrics, derivative, optimizers
 from core.flash.layers import *
-from core.flash.callback import Callback
+from core.flash.callbacks import Callback
 from core.vanilla.utility import do_nothing
 from system.config import *
 
@@ -64,118 +79,61 @@ yes, i've tried to fix it for hours and it still doesn't work.
 class Key:
 
   OPTIMIZER = {
-    "adam": optimizer.Adam,
-    "rmsprop": optimizer.RMSprop,
-    "adagrad": optimizer.Adagrad,
-    "amsgrad": optimizer.Amsgrad,
-    "adadelta": optimizer.Adadelta,
-    "gradclip": optimizer.Gradclip,
-    "adamax": optimizer.Adamax,
-    "sgnd": optimizer.SGND,
-    "default": optimizer.Default,
-    "rprop": optimizer.Rprop,
-    "momentum": optimizer.Momentum,
-    "novograd": optimizer.Novograd,
-  }
-  
-  OPTIMIZER_INITIALIZER = {
-    # ps: parameter shape
-    # pd: parameter dtype
-    
-    "default": lambda ps, pd: (), # No state needed for SGD
-    "gradclip": lambda ps, pd: (), # No state needed
-    "sgnd": lambda ps, pd: (), # No state needed
-    
-    "amsgrad": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # m
-        jnp.zeros(ps, dtype=pd),  # v
-        jnp.zeros(ps, dtype=pd)   # v_hat_max
-    ),
-    "momentum": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # velocity
-    ),
-    "rmsprop": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # avg_sq_grad
-    ),
-    "adagrad": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # sum_sq_grad
-    ),
-    "novograd": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # m
-        jnp.zeros(ps, dtype=pd)   # v
-    ),
-    "adam": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # m
-        jnp.zeros(ps, dtype=pd)   # v
-    ),
-    "adadelta": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # avg_sq_grad
-        jnp.zeros(ps, dtype=pd)   # avg_sq_delta
-    ),
-    "adamax": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),  # m
-        jnp.zeros(ps, dtype=pd)   # u_inf (max of past gradients)
-    ),
-    "rprop": lambda ps, pd: (
-        jnp.zeros(ps, dtype=pd),              # prev_grad
-        jnp.full(ps, 0.01, dtype=pd)  # step_size (often initialized to a small constant)
-    ),
+    "adam": optimizers.Adam,
+    "rmsprop": optimizers.RMSprop,
+    "adagrad": optimizers.Adagrad,
+    "amsgrad": optimizers.AMSgrad,
+    "adadelta": optimizers.Adadelta,
+    "gradclip": optimizers.Gradclip,
+    "adamax": optimizers.Adamax,
+    "sgnd": optimizers.SGND,
+    "default": optimizers.Default,
+    "rprop": optimizers.Rprop,
+    "momentum": optimizers.Momentum,
+    "novograd": optimizers.Novograd,
   }
 
   METRICS = {
 
     # classification metrics
-    "accuracy": metric.Accuracy,
-    "precision": metric.Precision,
-    "recall": metric.Recall,
-    "f1 score": metric.F1_score,
-    "roc auc": metric.ROC_AUC,
-    "r2 score": metric.R2_Score,
+    "accuracy": metrics.Accuracy,
+    "precision": metrics.Precision,
+    "recall": metrics.Recall,
+    "f1 score": metrics.F1_score,
+    "roc auc": metrics.ROC_AUC,
+    "r2 score": metrics.R2_Score,
     
     #regression
-    "mean squared error": loss.Mean_squared_error,
-    "Root mean squared error": loss.Root_mean_squared_error,
-    "mean absolute error": loss.Mean_absolute_error,
-    "total absolute error": loss.Total_absolute_error,
-    "total squared error": loss.Total_squared_error,
-    "l1 loss": loss.L1_loss,
+    "mean squared error": losses.Mean_squared_error,
+    "Root mean squared error": losses.Root_mean_squared_error,
+    "mean absolute error": losses.Mean_absolute_error,
+    "total absolute error": losses.Total_absolute_error,
+    "total squared error": losses.Total_squared_error,
+    "l1 loss": losses.L1_loss,
     
     # classification
-    "categorical crossentropy": loss.Categorical_crossentropy,
-    "sparse categorical crossentropy": loss.Sparse_categorical_crossentropy,
-    "binary crossentropy": loss.Binary_crossentropy,
+    "categorical crossentropy": losses.Categorical_crossentropy,
+    "sparse categorical crossentropy": losses.Sparse_categorical_crossentropy,
+    "binary crossentropy": losses.Binary_crossentropy,
 
   }
   
   LOSS = {
 
     #regression
-    "mean squared error": loss.Mean_squared_error,
-    "Root mean squared error": loss.Root_mean_squared_error,
-    "mean absolute error": loss.Mean_absolute_error,
-    "total absolute error": loss.Total_absolute_error,
-    "total squared error": loss.Total_squared_error,
-    "l1 loss": loss.L1_loss,
+    "mean squared error": losses.Mean_squared_error,
+    "Root mean squared error": losses.Root_mean_squared_error,
+    "mean absolute error": losses.Mean_absolute_error,
+    "total absolute error": losses.Total_absolute_error,
+    "total squared error": losses.Total_squared_error,
+    "l1 loss": losses.L1_loss,
     
     # classification
-    "categorical crossentropy": loss.Categorical_crossentropy,
-    "sparse categorical crossentropy": loss.Sparse_categorical_crossentropy,
-    "binary crossentropy": loss.Binary_crossentropy,
+    "categorical crossentropy": losses.Categorical_crossentropy,
+    "sparse categorical crossentropy": losses.Sparse_categorical_crossentropy,
+    "binary crossentropy": losses.Binary_crossentropy,
   }
-  
-  LOSS_DERIVATIVE = {
-    "mean squared error": derivative.Mean_squared_error_derivative,
-    "Root mean squared error": derivative.Root_mean_squared_error_derivative,
-    "mean absolute error": derivative.Mean_absolute_error_derivative,
-    "total absolute error": derivative.Total_absolute_error_derivative,
-    "total squared error": derivative.Total_squared_error_derivative,
-    "l1 loss": derivative.L1_loss_derivative,
-    
-    # classification
-    "categorical crossentropy": derivative.Categorical_crossentropy_derivative,
-    "sparse categorical crossentropy": derivative.Sparse_categorical_crossentropy_derivative,
-    "binary crossentropy": derivative.Binary_crossentropy_derivative,
-  }
+
   
 #######################################################################################################
 #                                          Sequential Model                                           #
@@ -242,27 +200,27 @@ class Sequential:
     -----
     Args
     -----
-    - input_shape           (tuple[int, ...])               : shape of the input data, include channels for image data and features for tabular data.
-    - loss                  (str)                           : loss function to use
-    - learning_rate         (float)                         : learning rate to use
-    - epochs                (int)                           : number of epochs to train for
-    - (Optional) metrics    (list)                          : metrics to use
-    - (Optional) batch_size (int)                           : batch size to use
-    - (Optional) verbose    (int)                           : verbosity level
-    - (Optional) logging    (int)                           : logging level
-    - (Optional) callbacks  (core.flash.callback instance)  : call a custom callback class during training with access to all local variables, read more in the documentation.
-    - (Optional) validation_split (float)               : fraction of the data to use for validation, must be between [0, 1). Default is 0 (no validation).
-    - (Optional) regularization (tuple[str, float]) : type of regularization to use, position 0 is the type ("L1" or "L2"), position 1 is the lambda value. Default is None (no regularization).
+    - input_shape                 (tuple[int, ...])              : shape of the input data, include channels for image data and features for tabular data.
+    - loss                        (str)                          : loss function to use
+    - learning_rate               (float)                        : learning rate to use
+    - epochs                      (int)                          : number of epochs to train for
+    - (Optional) metrics          (list)                         : metrics to use
+    - (Optional) batch_size       (int)                          : batch size to use
+    - (Optional) verbose          (int)                          : verbosity level
+    - (Optional) logging          (int)                          : how ofter to report if the verbosity is at least 3
+    - (Optional) early_stopping   (bool)                         : whether or not to use early stopping, Evaluates based on the validation set. Defaults to False
+    - (Optional) patience         (int)                          : how many epochs to wait before early stopping, defaults to 5
+    - (Optional) callbacks        (core.flash.callback instance) : call a custom callback class during training with access to all local variables, read more in the documentation.
+    - (Optional) validation_split (float)                        : fraction of the data to use for validation, must be between [0, 1). Default is 0 (no validation).
+    - (Optional) regularization   (tuple[str, float])            : type of regularization to use, position 0 is the type ("L1" or "L2"), position 1 is the lambda value. Default is None (no regularization).
     
     Verbosity Levels
     -----
     - 0 : None
     - 1 : Progress bar of the whole training process
-    - 2 : Progress bar of each epoch
-    - 3 : (Numerical output) Loss of each epoch
-    - 4 : (Numerical output) Loss and ∆Loss
-    - 5 : (Numerical output) Loss, ∆Loss and the Validation Loss
-    - 6 : (Numerical output) Loss, ∆Loss, Validation Loss and ∆Validation Loss
+    - 2 : (Numerical output) Loss
+    - 3 : (Numerical output) Loss and V Loss (Validation Loss)
+    - 4 : (Numerical output) Loss, V Loss (Validation Loss) and the 1st metric in the 'metrics' list
     
     Optimizers
     -----
@@ -302,13 +260,14 @@ class Sequential:
     """
     self.input_shape = input_shape
     self.learning_rate = learning_rate
-    self.epochs = epochs + 1
+    self.epochs = epochs
     self.batchsize = batch_size
     self.verbose = verbose
     self.logging = logging
     
     self.error_logs = []
     self.validation_error_logs = []
+    self.metrics_logs = []
     
     ############################################################################################
     #                        Initialize model parameters and connections                       #
@@ -355,17 +314,17 @@ class Sequential:
     #                                  Initialize optimizer                                    #
     ############################################################################################
     
-    if optimizer not in Key.OPTIMIZER:
+    if optimizer.lower() not in Key.OPTIMIZER:
       raise ValueError(f"Optimizer '{optimizer}' not supported.")
     
-    self.optimizer = Key.OPTIMIZER[optimizer]
+    self.optimizer = Key.OPTIMIZER[optimizer.lower()].update
     self.optimizer_hyperparams = {} # Store all remaining kwargs as optimizer hyperparams
 
     self.opt_state = jax.tree_util.tree_map(
-      lambda p: Key.OPTIMIZER_INITIALIZER[optimizer](p.shape, p.dtype),
+      lambda p: Key.OPTIMIZER[optimizer.lower()].initialize(p.shape, p.dtype),
       self.params_pytree
     )
-    
+     
     ############################################################################################
     #                                 Initialize loss function                                 #
     ############################################################################################
@@ -373,9 +332,7 @@ class Sequential:
     if loss not in Key.LOSS:
       raise ValueError(f"Loss function '{loss}' not supported.")
     
-    self.loss_derivative = jax.jit(Key.LOSS_DERIVATIVE[loss.lower()])
-    self.loss_function = jax.jit(Key.LOSS[loss.lower()])
-    self.loss_derivative = jax.jit(Key.LOSS_DERIVATIVE[loss.lower()])
+    self.loss = Key.LOSS[loss.lower()]
     
     ############################################################################################
     #                                 Initialize metrics                                       #
@@ -425,6 +382,16 @@ class Sequential:
     if type(self.regularization[1]) not in (int, float) or self.regularization[1] < 0:
       raise ValueError("regularization lambda must be a non-negative number")
     
+    #############################################################################################
+    #                                     early stopping                                        #
+    #############################################################################################
+    
+    self.enable_early_stopping = kwargs.get("early_stopping", False)
+    self.patience = kwargs.get("patience", 5)
+    
+    if self.validation_split == 0 and self.enable_early_stopping:
+      raise SystemError("Validation split cannot be 0 when early stopping is enabled.")
+    
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
     Fit
@@ -450,6 +417,8 @@ class Sequential:
       raise ValueError("features or targets must not be empty.")
     if features.shape[0] != targets.shape[0]:
       raise ValueError("features and targets must have the same number of samples.")
+    if len(features) < self.batchsize:
+      raise ValueError("batchsize cannot be larger than the number of samples.")
     if features.ndim == 1:
       features = features[:, None]
     if targets.ndim == 1:
@@ -563,7 +532,7 @@ class Sequential:
     
     @jax.jit
     def forward_loss(y_true, y_pred, regularization_lambda, regularization_type, parameters_pytree):
-      emperical_loss = self.loss_function(y_true, y_pred)
+      emperical_loss = self.loss.forward(y_true, y_pred)
       
       regularization_penalty = 0.0
       
@@ -583,7 +552,7 @@ class Sequential:
     
     @jax.jit
     def backward_loss(y_true, y_pred):
-      return self.loss_derivative(y_true, y_pred)
+      return self.loss.backward(y_true, y_pred)
     
     #############################################################################################
     #                                        Variables                                          #
@@ -608,18 +577,20 @@ class Sequential:
     callback = self.callback()
     callback.initialization(**locals())
     
+    patience_window = 0
+    
     #############################################################################################
     #                                           Main                                            #
     #############################################################################################
     
-    for epoch in (utility.progress_bar(range(self.epochs), "> Training", "Complete", decimals=2, length=100, empty=' ') if self.verbose == 1 else range(self.epochs)):
+    for epoch in (utility.progress_bar(range(self.epochs), "> Training", "Complete", decimals=2, length=50, empty=' ') if self.verbose == 1 else range(self.epochs)):
 
       callback.before_epoch(**locals())
       epoch_loss = 0.0
 
       for base_index in range(0, len(features), self.batchsize):
         if base_index + self.batchsize > len(features):
-          break
+          continue
         
         key = jax.random.PRNGKey(random.randint(0, 2**32))
         
@@ -637,7 +608,7 @@ class Sequential:
         callback.before_update(**locals())
         
         timestep += 1
-        current_params, current_opt_state = step(
+        current_params, current_opt_state = update_step(
           tuple(self.layers),
           backward_func_tuple,
           initial_error,  
@@ -656,19 +627,30 @@ class Sequential:
         self.params_pytree = current_params
         self.opt_state = current_opt_state
       
-      validation_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else do_nothing()
-      validation_loss = self.loss_function(validation_targets, validation_activations_and_weighted_sums['activations'][-1]) if len(validation_features) > 0 else do_nothing()
+      extra_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else do_nothing()
+      validation_loss = self.loss_function(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) if len(validation_features) > 0 else do_nothing()
+      
+      metric_stats = [metric_fn(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) for metric_fn in self.metrics] if len(self.metrics) > 0 else do_nothing()
+      self.metrics_logs.append(metric_stats)
       
       epoch_loss /= len(features)
       validation_loss /= len(features)
       
+      if self.enable_early_stopping and epoch > self.patience:
+        if validation_loss < self.validation_error_logs[-1]:
+          patience_window = epoch + self.patience
+      
+        if epoch > patience_window:
+          break
+      
       self.error_logs.append(epoch_loss)
       self.validation_error_logs.append(validation_loss) if len(validation_features) > 0 else do_nothing()
-          
+      
       ############ post training
       
       callback.after_epoch(**locals())
       
+      # NaN detection
       for layer_number, parameters in self.params_pytree.items():
         for param_name, param_value in parameters.items():
           if jnp.isnan(param_value).any():
@@ -676,30 +658,35 @@ class Sequential:
           if jnp.isinf(param_value).any():
             raise ValueError(f"Infinity detected in the {param_name} of layer {layer_number}. Training halted.")
 
-      if epoch % self.logging == 0 and self.verbose >= 2:
+      if (epoch+1) % self.logging == 0 and self.verbose >= 2 or epoch == 0:
         
-        prefix              = f"Epoch {epoch+1 if epoch == 0 else epoch}/{self.epochs-1} ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
-        pad                 = ' ' * ( len(f"Epoch {self.epochs}/{self.epochs-1} (100.0%)") - len(prefix))
-        suffix              = f" ┃ Loss: {str(epoch_loss):22}"
-        rate                = f" ┃ ∆Loss: {str(epoch_loss - self.error_logs[epoch-self.logging] if epoch >= self.logging else 0):23}"
+        lossROC = 0 if (epoch+1) < self.logging else epoch_loss - self.error_logs[(epoch+1)-self.logging]
+        validationROC = 0 if (epoch+1) < self.logging else validation_loss - self.validation_error_logs[(epoch+1)-self.logging] if self.validation_split > 0 else 0
+        metricROC = 0 if (epoch+1) < self.logging else metric_stats[0] - self.metrics_logs[(epoch+1)-self.logging][0] if len(self.metrics) > 0 else 0
         
-        if len(validation_features) > 0:
-          validation_suffix = f" ┃ Validation: {str(validation_loss):22}"
-          validation_rate   = f" ┃ ∆Validation: {validation_loss - self.validation_error_logs[epoch-self.logging] if epoch >= self.logging else 0}"
+        prefix = f"\033[1mEpoch {epoch+1}/{self.epochs}\033[0m ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
+        prefix += ' ' * (25 + len(f"{self.epochs}") * 2 - len(prefix))
         
-        else:
-          validation_suffix = f" ┃ Validation: {str('Unavailable'):12}"
-          validation_rate   = f" ┃ ∆Validation: Unavailable"
+        print_loss = f"Loss: {epoch_loss:.2E}" if epoch_loss > 1000 or epoch_loss < 0.00001 else f"Loss: {epoch_loss:.5f}"
+        print_loss = f"┃ \033[32m{print_loss:16}\033[0m" if lossROC < 0 else f"┃ \033[31m{print_loss:16}\033[0m" if lossROC > 0 else f"┃ {print_loss:16}"
         
-        if self.verbose == 3:
-          print(prefix + pad + suffix)
+        if self.verbose == 2:
+          print(prefix + print_loss)
+        
+        elif self.verbose == 3:
+          print_validation = f"V Loss: {validation_loss:.2E}" if validation_loss > 1000 or validation_loss < 0.00001 else f"V Loss: {validation_loss:.5f}" if self.validation_split > 0 else f"V Loss: N/A"
+          print_validation = f"┃ \033[32m{print_validation:16}\033[0m" if validationROC < 0 else f"┃ \033[31m{print_validation:16}\033[0m" if validationROC > 0 else f"┃ {print_validation:16}"
+          print(prefix + print_loss + print_validation)
+        
         elif self.verbose == 4:
-          print(prefix + pad + suffix + rate)
-        elif self.verbose == 5:
-          print(prefix + pad + suffix + rate + validation_suffix)
-        elif self.verbose == 6:
-          print(prefix + pad + suffix + rate + validation_suffix + validation_rate)
-
+          print_metric = f"{self.metrics[0].__name__}: {metric_stats[0]:.5f}" if len(self.metrics) >= 1 else "Metrics N/A"
+          print_metric = f"┃ \033[32m{print_metric:16}\033[0m" if metricROC > 0 else f"┃ \033[31m{print_metric:16}\033[0m" if metricROC < 0 else f"┃ {print_metric:16}"
+          
+          print_validation = f"V Loss: {validation_loss:.2E}" if validation_loss > 1000 or validation_loss < 0.00001 else f"V Loss: {validation_loss:.5f}" if self.validation_split > 0 else f"V Loss: N/A"
+          print_validation = f"┃ \033[32m{print_validation:16}\033[0m" if validationROC < 0 else f"┃ \033[31m{print_validation:16}\033[0m" if validationROC > 0 else f"┃ {print_validation:16}"
+          
+          print(prefix + print_loss + print_validation + print_metric)
+            
     self.params_pytree = current_params
     
     callback.end(**locals())

@@ -26,7 +26,6 @@ Provides
   1. Recurrent
   2. LSTM
   3. GRU
-
 """
 #######################################################################################################
 #                                    File Information and Handling                                    #
@@ -54,19 +53,19 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools import arraytools, scaler, utility, visual
 from tools import math as math2
 
-from core.vanilla import activation as Activation
-from core.vanilla import derivative as Derivative
-from core.vanilla import loss as Error
-from core.vanilla import metric as Metrics
-from core.vanilla import initialization as Initialization
-from core.vanilla import parametric_derivative as P_Derivative
+from core.vanilla import activations as Activation
+from core.vanilla import derivatives as Derivative
+from core.vanilla import losses as Error
+from core.vanilla import metrics as Metrics
+from core.vanilla import initializations as Initialization
+from core.vanilla import parametric_derivatives as P_Derivative
 from core.vanilla.utility import *
 
 from system.config import *
 from system.defaults import *
 
 from core.vanilla.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
-import core.vanilla.optimizer as optimizer
+import core.vanilla.optimizers as optimizers
 
 #######################################################################################################
 #                                               Extra                                                 #
@@ -410,19 +409,19 @@ class Key:
   }
   
   OPTIMIZER = {
-    'adam': optimizer.Adam,
-    'rmsprop': optimizer.RMSprop,
-    'adagrad': optimizer.Adagrad,
-    'amsgrad': optimizer.Amsgrad,
-    'adadelta': optimizer.Adadelta,
-    'gradclip': optimizer.Gradclip,
-    'adamax': optimizer.Adamax,
-    'sgnd': optimizer.SGND,
-    'default': optimizer.Default,
-    'none': optimizer.Default,
-    'rprop': optimizer.Rprop,
-    'momentum': optimizer.Momentum,
-    'novograd': optimizer.Novograd,
+    'adam': optimizers.Adam,
+    'rmsprop': optimizers.RMSprop,
+    'adagrad': optimizers.Adagrad,
+    'amsgrad': optimizers.Amsgrad,
+    'adadelta': optimizers.Adadelta,
+    'gradclip': optimizers.Gradclip,
+    'adamax': optimizers.Adamax,
+    'sgnd': optimizers.SGND,
+    'default': optimizers.Default,
+    'none': optimizers.Default,
+    'rprop': optimizers.Rprop,
+    'momentum': optimizers.Momentum,
+    'novograd': optimizers.Novograd,
   }
 
   METRICS = {
