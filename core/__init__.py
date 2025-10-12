@@ -5,6 +5,6 @@ There are three core folders; flash, vanilla, and lab. one for their respective 
 
 from . import flash
 from . import static
-from . import lab
+from . import standard
 
-__all__ = ['flash', 'static', 'lab']
+__all__ = ['flash', 'static', 'standard']

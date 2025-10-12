@@ -9,7 +9,7 @@ class Activation(ABC):
   Base class for all activation functions. 
   
   An activation class is required to have the following:
-  - A `forward` method for applying the activation function.
+  - `forward` : method for applying the activation function.
     - Args:
       - x (jnp.ndarray): The input array to the activation function.
       - *args: Variable length argument list.  Can be used to pass additional information to the activation function.
@@ -18,7 +18,7 @@ class Activation(ABC):
     - Returns:
       - jnp.ndarray: The output array after applying the activation function, with the same dimensions as the input.
   
-  - A `backward` method for computing the gradient of the activation function. 
+  - `backward` : method for computing the gradient of the activation function. 
     - Args:
       - incoming_error (jnp.ndarray): The incoming error signal from the subsequent layer.
       - x (jnp.ndarray): The input to the activation function during the forward pass.  This is needed to compute the gradient.
