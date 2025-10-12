@@ -18,9 +18,9 @@ Provided Regression Models
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.vanilla.activations import Sigmoid
+from core.static.activations import Sigmoid
 import tools.utility as utility
-from api.netcore import Key
+from api.solonet import Key
 import random, numpy as np, math, itertools
 from tools.math import sgn
 

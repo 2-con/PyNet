@@ -8,12 +8,12 @@ from tools import arraytools, scaler
 from system.defaults import parametric_alpha_default, parametric_beta_default
 from system.config import *
 
-from core.vanilla import activations as Activation
-from core.vanilla import initializations as Initialization
-from core.vanilla.datafields import Datacontainer as dc
-from core.vanilla import derivatives as Derivative
-from core.vanilla import parametric_derivatives as P_Derivative
-from core.vanilla.utility import do_nothing
+from core.static import activations as Activation
+from core.static import initializations as Initialization
+from core.static.datafields import Datacontainer as dc
+from core.static import derivatives as Derivative
+from core.static import parametric_derivatives as P_Derivative
+from core.static.utility import do_nothing
 
 class Key:
 

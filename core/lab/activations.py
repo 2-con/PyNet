@@ -8,9 +8,26 @@ class Activation(ABC):
   """
   Base class for all activation functions. 
   
-  An activation function class is required to have the following:
+  An activation class is required to have the following:
   - A `forward` method for applying the activation function.
+    - Args:
+      - x (jnp.ndarray): The input array to the activation function.
+      - *args: Variable length argument list.  Can be used to pass additional information to the activation function.
+      - **kwargs: Arbitrary keyword arguments. Used to pass parameters (if any) to the activation function. 
+                Make sure the parameter names match those listed in the 'parameters' attribute.
+    - Returns:
+      - jnp.ndarray: The output array after applying the activation function, with the same dimensions as the input.
+  
   - A `backward` method for computing the gradient of the activation function. 
+    - Args:
+      - incoming_error (jnp.ndarray): The incoming error signal from the subsequent layer.
+      - x (jnp.ndarray): The input to the activation function during the forward pass.  This is needed to compute the gradient.
+      - *args: Variable length argument list.  Can be used to pass additional information to the activation function.
+      - **kwargs: Arbitrary keyword arguments. Used to pass parameters (if any) to the activation function.
+    
+    - Returns:
+      - dict: A dictionary containing the gradient of the loss with respect to the key (incoming_error * local_gradient).  
+            The key are 'x' along with any parametric parameters specified in 'parameters'.
   
   Attributes:
     parameters (list): A list of strings, where each string is the name of a parameter 
@@ -31,6 +48,15 @@ class Activation(ABC):
     
     Returns:
       jnp.ndarray: The output array after applying the activation function, with the same dimensions as the input.
+      Args:
+      incoming_error (jnp.ndarray): The incoming error signal from the subsequent layer.
+      x (jnp.ndarray): The input to the activation function during the forward pass.  This is needed to compute the gradient.
+      *args: Variable length argument list.  Can be used to pass additional information to the activation function.
+      **kwargs: Arbitrary keyword arguments. Used to pass parameters (if any) to the activation function.
+    
+    Returns:
+      dict: A dictionary containing the gradient of the loss with respect to the key (incoming_error * local_gradient).  
+            The key are 'x' along with any parametric parameters specified in 'parameters'.
     """
     pass
   

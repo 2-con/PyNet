@@ -11,7 +11,7 @@ import core.flash.activations as activations
 import core.flash.initializers as initializers
 import core.flash.scalers as scalers
 import core.flash.encoders as encoders
-from core.vanilla.utility import do_nothing
+from core.static.utility import do_nothing
 
 class Key:
 
@@ -55,21 +55,15 @@ class Key:
     "ordinal": encoders.OrdinalEncoder
   }
   
-  ENCODER_DERIVATIVE = {
-    "sinusoidal positional": lambda x: x,
-    "one hot": lambda x: x,
-    "ordinal": lambda x: x
-  }
-  
   INITIALIZER = {
-    "glorot uniform": initializers.Glorot_uniform,
-    "glorot normal": initializers.Glorot_normal,
-    "he uniform": initializers.He_uniform,
-    "he normal": initializers.He_normal,
-    "lecun uniform": initializers.Lecun_uniform,
-    "lecun normal": initializers.Lecun_normal,
-    "xavier uniform in": initializers.Xavier_uniform_in,
-    "xavier uniform out": initializers.Xavier_uniform_out,
+    "glorot uniform": initializers.Glorot_Uniform,
+    "glorot normal": initializers.Glorot_Normal,
+    "he uniform": initializers.He_Uniform,
+    "he normal": initializers.He_Normal,
+    "lecun uniform": initializers.Lecun_Uniform,
+    "lecun normal": initializers.Lecun_Normal,
+    "xavier uniform in": initializers.Xavier_Uniform_In,
+    "xavier uniform out": initializers.Xavier_Uniform_Out,
     "default": initializers.Default
   }
 
@@ -138,30 +132,30 @@ class Dense:
     else:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
     self.input_size = None
 
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
-    self.input_size = fan_in[0]
-    weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in[0], fan_out_shape)
+  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+    self.input_size = fan_in_shape[0]
+    weights = self.initializer_fn((self.input_size, self.neuron_amount), fan_in_shape[0], fan_out_shape)
     biases = jnp.zeros((self.neuron_amount,))
     paremetric_parameters = {
-      paramater_name: self.initializer_fn((self.neuron_amount,), fan_in[0], fan_out_shape) for paramater_name in self.activation_object.parameters
+      paramater_name: self.initializer_fn((self.neuron_amount,), fan_in_shape[0], fan_out_shape) for paramater_name in self.activation_object.parameters
     }
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.neuron_amount,)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, in_features), weights: (in_features, out_features)
     weighted_sums = inputs @ params['weights'] + params['biases']
     activated_output = self.activation_fn(weighted_sums, **params)
@@ -192,6 +186,22 @@ class Dense:
     }
 
     return upstream_gradient, param_grads
+
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for name, value in layer_params.items():
+      updated_params[name], new_opt_state[name] = optimizer_fn(
+        learning_rate,
+        value,
+        gradients[name],
+        opt_state[name],
+        **other_parameters
+      )
+    
+    return updated_params, new_opt_state
 
 class Localunit:
   def __init__(self, receptive_field:int, activation, name:str="Null", *args, **kwargs):
@@ -258,16 +268,16 @@ class Localunit:
     else:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
     self.input_size = None
 
@@ -302,7 +312,7 @@ class Localunit:
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.mask.shape[0],)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, in_features), weights: (in_features, out_features)
     weighted_sums = inputs @ (params['weights'] * self.mask) + params['biases']
     activated_output = self.activation_fn(weighted_sums, **params)
@@ -332,6 +342,22 @@ class Localunit:
     }
 
     return upstream_gradient, param_grads
+
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for name, value in layer_params.items():
+      updated_params[name], new_opt_state[name] = optimizer_fn(
+        learning_rate,
+        value,
+        gradients[name],
+        opt_state[name],
+        **other_parameters
+      )
+    
+    return updated_params, new_opt_state
 
 class Convolution:
   def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int], name:str="Null", *args, **kwargs):
@@ -413,15 +439,15 @@ class Convolution:
           f"Unknown initializer: '{kwargs['initializer'].lower()}'. "
           f"Available: {list(Key.INITIALIZER.keys())}"
         )
-      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]()
     else:
       # He for rectifiers, Glorot for normalizers, else default
       if activation.lower() in rectifiers:
-        self.initializer_fn = Key.INITIALIZER["he normal"]
+        self.initializer_fn = Key.INITIALIZER["he normal"]()
       elif activation.lower() in normalization:
-        self.initializer_fn = Key.INITIALIZER["glorot normal"]
+        self.initializer_fn = Key.INITIALIZER["glorot normal"]()
       else:
-        self.initializer_fn = Key.INITIALIZER["default"]
+        self.initializer_fn = Key.INITIALIZER["default"]()
 
   def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
     # fan_in_shape = (C_in, H, W)
@@ -444,7 +470,7 @@ class Convolution:
     
     return {"weights": weights, "biases": biases, **parametrics}, (self.channels, out_H, out_W)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
     inputs: (N, C_in, H, W)
     weights: (C_out, C_in, kH, kW)
@@ -562,6 +588,22 @@ class Convolution:
 
     return upstream_gradient, {"weights": grad_weights, "biases": grad_bias, **parametric_gradients}
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for name, value in layer_params.items():
+      updated_params[name], new_opt_state[name] = optimizer_fn(
+        learning_rate,
+        value,
+        gradients[name],
+        opt_state[name],
+        **other_parameters
+      )
+    
+    return updated_params, new_opt_state
+
 class Deconvolution:
   def __init__(self, kernel:tuple[int, int], channels:int, activation:str, stride:tuple[int, int], name:str="Null", *args, **kwargs):
     """
@@ -642,15 +684,15 @@ class Deconvolution:
           f"Unknown initializer: '{kwargs['initializer'].lower()}'. "
           f"Available: {list(Key.INITIALIZER.keys())}"
         )
-      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs["initializer"].lower()]()
     else:
       # He for rectifiers, Glorot for normalizers, else default
       if activation.lower() in rectifiers:
-        self.initializer_fn = Key.INITIALIZER["he normal"]
+        self.initializer_fn = Key.INITIALIZER["he normal"]()
       elif activation.lower() in normalization:
-        self.initializer_fn = Key.INITIALIZER["glorot normal"]
+        self.initializer_fn = Key.INITIALIZER["glorot normal"]()
       else:
-        self.initializer_fn = Key.INITIALIZER["default"]
+        self.initializer_fn = Key.INITIALIZER["default"]()
 
   def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
     # fan_in_shape = (C_in, H, W)
@@ -675,7 +717,7 @@ class Deconvolution:
 
     return self.params.update(parametrics), (self.channels, out_H, out_W)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if inputs.ndim != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
       
@@ -774,6 +816,22 @@ class Deconvolution:
 
     return upstream_gradient, {"weights": grad_weights, "biases": grad_bias, **param_gradients}
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for name, value in layer_params.items():
+      updated_params[name], new_opt_state[name] = optimizer_fn(
+        learning_rate,
+        value,
+        gradients[name],
+        opt_state[name],
+        **other_parameters
+      )
+    
+    return updated_params, new_opt_state
+
 class Recurrent:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
     """
@@ -842,16 +900,16 @@ class Recurrent:
     else:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -879,7 +937,7 @@ class Recurrent:
       }
     return params, (len(self.output_sequence),sequence_length)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # inputs: (batch, seq_len, features)
     batches, seq_len, features = inputs.shape
     per_batch_output = []
@@ -971,6 +1029,30 @@ class Recurrent:
 
     return input_grads, grads
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for cell_key, cell_params in layer_params.items():
+      cell_grads = gradients[cell_key]
+      new_cell_params = {}
+      new_cell_opt_state = {}
+
+      for param_name, param_value in cell_params.items():
+        new_cell_params[param_name], new_cell_opt_state[param_name] = optimizer_fn(
+          learning_rate,
+          param_value,
+          cell_grads[param_name],
+          opt_state[cell_key][param_name],
+          **other_parameters
+        )
+
+      updated_params[cell_key] = new_cell_params
+      new_opt_state[cell_key] = new_cell_opt_state
+    
+    return updated_params, new_opt_state
+
 class LSTM:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
     """
@@ -1040,16 +1122,16 @@ class LSTM:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # initializer selection matching your Recurrent
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -1098,7 +1180,7 @@ class LSTM:
       }
     return params, (len(self.output_sequence),sequence_length)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batches, cells_dim, features = inputs.shape
     if cells_dim != self.cells:
       raise ValueError(f"apply mismatch: inputs has cells_dim={cells_dim} but self.cells={self.cells}")
@@ -1322,6 +1404,30 @@ class LSTM:
 
     return input_grads, grads
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for cell_key, cell_params in layer_params.items():
+      cell_grads = gradients[cell_key]
+      new_cell_params = {}
+      new_cell_opt_state = {}
+
+      for param_name, param_value in cell_params.items():
+        new_cell_params[param_name], new_cell_opt_state[param_name] = optimizer_fn(
+          learning_rate,
+          param_value,
+          cell_grads[param_name],
+          opt_state[cell_key][param_name],
+          **other_parameters
+        )
+
+      updated_params[cell_key] = new_cell_params
+      new_opt_state[cell_key] = new_cell_opt_state
+    
+    return updated_params, new_opt_state
+
 class GRU:
   def __init__(self, cells:int, activation:str, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, name:str="Null", *args, **kwargs):
     """
@@ -1390,16 +1496,16 @@ class GRU:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # default init
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -1444,7 +1550,7 @@ class GRU:
     # return params and output shape (len(output_sequence) used elsewhere), but keep consistent with prior API
     return params, (len(self.output_sequence), features)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batches, seq_len, features = inputs.shape
     per_batch_output = []
     per_batch_WS = []
@@ -1642,6 +1748,30 @@ class GRU:
 
     return input_grads, grads
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for cell_key, cell_params in layer_params.items():
+      cell_grads = gradients[cell_key]
+      new_cell_params = {}
+      new_cell_opt_state = {}
+
+      for param_name, param_value in cell_params.items():
+        new_cell_params[param_name], new_cell_opt_state[param_name] = optimizer_fn(
+          learning_rate,
+          param_value,
+          cell_grads[param_name],
+          opt_state[cell_key][param_name],
+          **other_parameters
+        )
+
+      updated_params[cell_key] = new_cell_params
+      new_opt_state[cell_key] = new_cell_opt_state
+    
+    return updated_params, new_opt_state
+
 class Attention:
   def __init__(self, heads:int, activation:str, name:str="Null", *args, **kwargs):
     """
@@ -1672,16 +1802,16 @@ class Attention:
       raise ValueError("Activation must be a string or an object with 'forward' and 'backward' methods.")
 
     # initializer selection
-    self.initializer_fn = Key.INITIALIZER['default']
+    self.initializer_fn = Key.INITIALIZER['default']()
     if activation.lower() in rectifiers:
-      self.initializer_fn = Key.INITIALIZER['he normal']
+      self.initializer_fn = Key.INITIALIZER['he normal']()
     elif activation.lower() in normalization:
-      self.initializer_fn = Key.INITIALIZER['glorot normal']
+      self.initializer_fn = Key.INITIALIZER['glorot normal']()
 
     if 'initializer' in kwargs:
       if kwargs['initializer'].lower() not in Key.INITIALIZER:
         raise ValueError(f"Unknown initializer: '{kwargs['initializer'].lower()}'. Available: {list(Key.INITIALIZER.keys())}")
-      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]
+      self.initializer_fn = Key.INITIALIZER[kwargs['initializer'].lower()]()
 
   def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
     """
@@ -1714,7 +1844,7 @@ class Attention:
 
     return params.update(parametrics), (features, sequence_length)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batch_size, features, seq_len = inputs.shape
     per_batch_outputs = []
     per_batch_WS = []
@@ -1838,6 +1968,30 @@ class Attention:
 
     return upstream_grads, grads.update(parametrics)
 
+  @staticmethod
+  def update(optimizer_fn, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, **other_parameters:dict) -> dict:
+    updated_params = {}
+    new_opt_state = {}
+    
+    for cell_key, cell_params in layer_params.items():
+      cell_grads = gradients[cell_key]
+      new_cell_params = {}
+      new_cell_opt_state = {}
+
+      for param_name, param_value in cell_params.items():
+        new_cell_params[param_name], new_cell_opt_state[param_name] = optimizer_fn(
+          learning_rate,
+          param_value,
+          cell_grads[param_name],
+          opt_state[cell_key][param_name],
+          **other_parameters
+        )
+
+      updated_params[cell_key] = new_cell_params
+      new_opt_state[cell_key] = new_cell_opt_state
+    
+    return updated_params, new_opt_state
+
 # functional layers
 
 class MaxPooling:
@@ -1865,7 +2019,7 @@ class MaxPooling:
     
     return {}, (C, pooled_H, pooled_W)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if len(inputs.shape) != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
@@ -1929,7 +2083,7 @@ class MeanPooling:
     self.input_shape = fan_in_shape
     return {}, (C, pooled_H, pooled_W)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if len(inputs.shape) != 4:
       inputs = jnp.expand_dims(inputs, axis=1)
 
@@ -1986,7 +2140,7 @@ class Flatten:
     
     return {}, (int(flattened_size),)
 
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     # Flatten batch to (batch, features)
     flattened_output = inputs.reshape(inputs.shape[0], -1)
     
@@ -2047,7 +2201,7 @@ class Operation:
         
       if operation in Key.ENCODER:
         self.operation_fn = Key.ENCODER[operation.lower()]
-        self.operation_derivative_fn = Key.ENCODER_DERIVATIVE[operation.lower()]
+        self.operation_derivative_fn = lambda x:x # encoders are not differentiable
 
     else:
       self.operation_fn = operation
@@ -2071,7 +2225,7 @@ class Operation:
     
     return {}, fan_in_shape
   
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     return self.operation_fn(inputs), inputs  # WS is just inputs for backprop
   
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
@@ -2091,7 +2245,7 @@ class Dropout:
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
     return {}, fan_in_shape
   
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if self.rate == 0.0:
       return inputs, jnp.ones_like(inputs)
     
@@ -2127,7 +2281,7 @@ class Reshape:
     
     return {}, self.target_shape
   
-  def apply(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batch_size = inputs.shape[0]
     reshaped_output = inputs.reshape((batch_size, *self.target_shape))
     

@@ -1,6 +1,79 @@
 import jax
-
 import jax.numpy as jnp
+
+class Loss_calculator:
+  """
+  Loss class for calculating the loss as well as regularized gradients.
+  """
+  @staticmethod
+  def forward_loss(y_true:jnp.ndarray, y_pred:jnp.ndarray, loss, regularization_lambda:float, regularization_type:str, parameters_pytree:dict):
+    """
+    Forward Loss
+    -----
+      Calculate the total loss for a given batch of y_true and y_pred. This includes both the empirical loss and regularization penalty.
+    -----
+    Args
+    -----
+    - y_true (jnp.ndarray) : the true labels for the batch
+    - y_pred (jnp.ndarray) : the predicted labels for the batch
+    - loss_class (core.flash.losses object) : the class of the loss function to use
+    - regularization_lambda (float) : the regularization strength
+    - regularization_type (str) : the type of regularization to use ("L1" or "L2")
+    - parameters_pytree (dict) : a pytree of parameters for the model
+    
+    Returns:
+    - float : the total loss for the batch
+    """
+    emperical_loss = loss.forward(y_true, y_pred)
+    
+    regularization_penalty = 0.0
+    
+    for _, parameters in parameters_pytree.items():
+      for param_name, param_value in parameters.items():
+        if param_name in ('bias', 'biases'):
+          continue
+        
+        if regularization_type == "L2":
+          regularization_penalty += jnp.sum(jnp.square(param_value))
+        elif regularization_type == "L1":
+          regularization_penalty += jnp.sum(jnp.abs(param_value))
+        else:
+          continue
+        
+    return emperical_loss + regularization_lambda * regularization_penalty
+  
+  @staticmethod
+  def regularized_grad(layer_params:dict, gradients:jnp.ndarray, regularization_lambda, regularization_type, ignore_list=['bias', 'biases']):
+    """
+    Regularized Gradient
+    -----
+      Modify the gradients of the parameters according to the regularization type and strength.
+    -----
+    Args
+    -----
+    - layer_params (dict) : a dictionary of parameters for the layer
+    - gradients (dict) : a dictionary of gradients for the layer
+    - regularization_lambda (float) : the regularization strength
+    - regularization_type (str) : the type of regularization to use ("L1" or "L2")
+    
+    Returns
+    ----
+    - dict : the modified gradients for the layer
+    """
+    for param_name, param_value in layer_params.items():
+      if param_name in ignore_list:
+        continue
+      
+      if regularization_type == "L2":
+        gradients[param_name] += 2 * regularization_lambda * param_value
+      
+      elif regularization_type == "L1":
+        gradients[param_name] += regularization_lambda * jnp.sign(param_value)
+      
+      else:
+        continue
+      
+    return gradients
 
 class Mean_squared_error:
   @staticmethod

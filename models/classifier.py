@@ -17,9 +17,9 @@ Provides
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools.arraytools import shape, transpose, distance
-from core.vanilla.losses import Entropy, Gini_impurity
-from core.vanilla.datafields import Node as n
-from core.vanilla.datafields import Datacontainer as dc
+from core.static.losses import Entropy, Gini_impurity
+from core.static.datafields import Node as n
+from core.static.datafields import Datacontainer as dc
 import random
 import math
 

@@ -54,10 +54,10 @@ import jax
 import jax.numpy as jnp
 
 from tools import utility
-from core.flash import losses, metrics, derivative, optimizers
+from core.flash import losses, metrics, optimizers
 from core.flash.layers import *
 from core.flash.callbacks import Callback
-from core.vanilla.utility import do_nothing
+from core.static.utility import do_nothing
 from system.config import *
 
 #######################################################################################################
@@ -104,17 +104,17 @@ class Key:
     "r2 score": metrics.R2_Score,
     
     #regression
-    "mean squared error": losses.Mean_squared_error,
-    "Root mean squared error": losses.Root_mean_squared_error,
-    "mean absolute error": losses.Mean_absolute_error,
-    "total absolute error": losses.Total_absolute_error,
-    "total squared error": losses.Total_squared_error,
-    "l1 loss": losses.L1_loss,
+    "mean squared error": losses.Mean_squared_error().forward,
+    "Root mean squared error": losses.Root_mean_squared_error().forward,
+    "mean absolute error": losses.Mean_absolute_error().forward,
+    "total absolute error": losses.Total_absolute_error().forward,
+    "total squared error": losses.Total_squared_error().forward,
+    "l1 loss": losses.L1_loss().forward,
     
     # classification
-    "categorical crossentropy": losses.Categorical_crossentropy,
-    "sparse categorical crossentropy": losses.Sparse_categorical_crossentropy,
-    "binary crossentropy": losses.Binary_crossentropy,
+    "categorical crossentropy": losses.Categorical_crossentropy().forward,
+    "sparse categorical crossentropy": losses.Sparse_categorical_crossentropy().forward,
+    "binary crossentropy": losses.Binary_crossentropy().forward,
 
   }
   
@@ -259,7 +259,7 @@ class Sequential:
     - R2 Score
     """
     self.input_shape = input_shape
-    self.learning_rate = learning_rate
+    self.learning_rate = jnp.float32(learning_rate)
     self.epochs = epochs
     self.batchsize = batch_size
     self.verbose = verbose
@@ -279,9 +279,9 @@ class Sequential:
     # set sizes while ignoring fans
     for layer_index, layer in enumerate(self.layers):
       if layer_index == 0:
-        _, layer_size = layer.calibrate(input_shape,1) if type(layer) in (Dense, '') else layer.calibrate(input_shape,(1,))
+        _, layer_size = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=1) if type(layer) in (Dense, '') else layer.calibrate(fan_in_shape=input_shape, fan_out_shape=(1,))
       else:
-        _, layer_size = layer.calibrate(sizes[layer_index-1],1) if type(layer) in (Dense, '') else layer.calibrate(sizes[layer_index-1],(1,))
+        _, layer_size = layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=1) if type(layer) in (Dense, '') else layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=(1,))
       
       sizes.append(layer_size)
     
@@ -289,16 +289,16 @@ class Sequential:
       # Pass the individual key to the layer's init_params method
       
       if len(sizes) == 1:
-        layer_params, _ = layer.calibrate(input_shape, sizes[layer_index])
+        layer_params, _ = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=sizes[layer_index])
       
       elif layer_index == 0: # If this is the first layer, use the input shape
-        layer_params, _ = layer.calibrate(input_shape, sizes[layer_index+1])
+        layer_params, _ = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=sizes[layer_index+1])
       
       elif layer_index == len(self.layers) - 1: # If this is the last layer, use the output shape of the previous layer
-        layer_params, _ = layer.calibrate(sizes[layer_index-1], sizes[layer_index])
+        layer_params, _ = layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=sizes[layer_index])
       
       else:
-        layer_params, _ = layer.calibrate(sizes[layer_index-1], sizes[layer_index+1])
+        layer_params, _ = layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=sizes[layer_index+1])
       
       if layer_params: # if layer_params is not empty
         
@@ -317,7 +317,7 @@ class Sequential:
     if optimizer.lower() not in Key.OPTIMIZER:
       raise ValueError(f"Optimizer '{optimizer}' not supported.")
     
-    self.optimizer = Key.OPTIMIZER[optimizer.lower()].update
+    self.optimizer_fn = Key.OPTIMIZER[optimizer.lower()].update
     self.optimizer_hyperparams = {} # Store all remaining kwargs as optimizer hyperparams
 
     self.opt_state = jax.tree_util.tree_map(
@@ -440,7 +440,7 @@ class Sequential:
       for i, layer in enumerate(self.layers):
         
         layer_params = parameters.get(f'layer_{i}', {})
-        x, weighted_sum = layer.apply(layer_params, x)
+        x, weighted_sum = layer.forward(layer_params, x)
         
         activations.append(x)
         weighted_sums.append(weighted_sum)
@@ -451,108 +451,37 @@ class Sequential:
       }
     
     def step(
-      layers_tuple:tuple, backward_func_tuple:tuple,
+      layers_tuple:tuple,
       error:jnp.ndarray, parameters_pytree:dict, opt_state:dict, activations:jnp.ndarray, weighted_sums:jnp.ndarray, 
-      timestep:int, optimizer_hyperparams:dict, learning_rate:float, regularization_lambda:float, regularization_type:str) -> tuple[dict, dict]:
+      timestep:int, optimizer_hyperparams:dict) -> tuple[dict, dict]:
       
       for layer_index in reversed(range(len(layers_tuple))):
         layer = self.layers[layer_index]
         
         layer_params = parameters_pytree.get(f'layer_{layer_index}', {})
         
-        error, gradients = backward_func_tuple[layer_index](layer_params, activations[layer_index], error, weighted_sums[layer_index])
+        error, gradients = layer.backward(layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
-        for param_name, param_value in layer_params.items():
-          if param_name in ('bias', 'biases'):
-            continue
-          
-          if regularization_type == "L2":
-            gradients[param_name] += 2 * regularization_lambda * param_value
-          
-          elif regularization_type == "L1":
-            gradients[param_name] += regularization_lambda * jnp.sign(param_value)
-          
-          else:
-            continue
+        gradients = losses.Loss_calculator.regularized_grad(layer_params, gradients, self.regularization[1], self.regularization[0], ignore_list=['bias', 'biases'])
         
-        if type(layer) in (Flatten, MaxPooling, MeanPooling, Operation, Dropout, Reshape):
+        if hasattr(layer, "update"):
+          parameters_pytree[f'layer_{layer_index}'], opt_state[f'layer_{layer_index}'] = layer.update(
+            self.optimizer_fn,
+            self.learning_rate,
+            layer_params,
+            gradients,
+            opt_state[f'layer_{layer_index}'],
+            timestep=timestep, 
+            **optimizer_hyperparams
+          )
+          
+        else:
           # this is just to skip layers that don't have parameters
           # their backward methods will still be called above to propagate the error correctly
           
           continue
         
-        if type(layer) in (Recurrent, LSTM, GRU, Attention):
-          new_layer_params = {}
-          new_opt_state = {}
-
-          for cell_key, cell_params in layer_params.items():
-            cell_grads = gradients[cell_key]
-            new_cell_params = {}
-            new_cell_opt_state = {}
-
-            for param_name, param_value in cell_params.items():
-              updated_param, updated_opt_state = self.optimizer(
-                learning_rate,
-                param_value,
-                cell_grads[param_name],
-                opt_state[f'layer_{layer_index}'][cell_key][param_name],
-                timestep=timestep,
-                **optimizer_hyperparams
-              )
-              new_cell_params[param_name] = updated_param
-              new_cell_opt_state[param_name] = updated_opt_state
-
-            new_layer_params[cell_key] = new_cell_params
-            new_opt_state[cell_key] = new_cell_opt_state
-
-          parameters_pytree[f'layer_{layer_index}'] = new_layer_params
-          opt_state[f'layer_{layer_index}'] = new_opt_state
-          
-        elif type(layer) in (Dense, Convolution, Deconvolution, Localunit):
-          
-          updated_params = {}
-          for name, value in layer_params.items():
-            updated_param_value, opt_state[f'layer_{layer_index}'][name] = self.optimizer(
-              learning_rate,
-              value,
-              gradients[name],
-              opt_state[f'layer_{layer_index}'][name],
-              timestep=timestep,
-              **optimizer_hyperparams
-            )
-            
-            updated_params[name] = updated_param_value
-        
-          parameters_pytree[f'layer_{layer_index}'] = updated_params
-        
-        else:
-          raise NotImplementedError(f"Backpropagation and update systems are not implemented for layer of type \"{type(layer).__name__}\"")
-        
       return parameters_pytree, opt_state
-    
-    @jax.jit
-    def forward_loss(y_true, y_pred, regularization_lambda, regularization_type, parameters_pytree):
-      emperical_loss = self.loss.forward(y_true, y_pred)
-      
-      regularization_penalty = 0.0
-      
-      for _, parameters in parameters_pytree.items():
-        for param_name, param_value in parameters.items():
-          if param_name in ('bias', 'biases'):
-            continue
-          
-          if regularization_type == "L2":
-            regularization_penalty += jnp.sum(jnp.square(param_value))
-          elif regularization_type == "L1":
-            regularization_penalty += jnp.sum(jnp.abs(param_value))
-          else:
-            continue
-          
-      return emperical_loss + regularization_lambda * regularization_penalty
-    
-    @jax.jit
-    def backward_loss(y_true, y_pred):
-      return self.loss.backward(y_true, y_pred)
     
     #############################################################################################
     #                                        Variables                                          #
@@ -570,9 +499,7 @@ class Sequential:
     current_opt_state = self.opt_state
     timestep = 0
     
-    update_step = jax.jit(step, static_argnums=(0,1)) # static argnums dosent work for JIT wrappers apparently...
-    backward_func_tuple = tuple(layer.backward for layer in self.layers)
-    learning_rate = jnp.float32(self.learning_rate)
+    update_step = jax.jit(step, static_argnums=(0,)) # static argnums dosent work for JIT wrappers apparently...
     
     callback = self.callback()
     callback.initialization(**locals())
@@ -602,15 +529,14 @@ class Sequential:
         # actual training method
         
         activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
-        epoch_loss += forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.regularization[1], self.regularization[0], self.params_pytree)
-        initial_error = backward_loss(batch_targets, activations_and_weighted_sums['activations'][-1])
+        epoch_loss += losses.Loss_calculator.forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree)
+        initial_error = self.loss.backward(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         callback.before_update(**locals())
         
         timestep += 1
         current_params, current_opt_state = update_step(
           tuple(self.layers),
-          backward_func_tuple,
           initial_error,  
           self.params_pytree,
           self.opt_state,
@@ -618,9 +544,6 @@ class Sequential:
           activations_and_weighted_sums['weighted_sums'],
           timestep,
           self.optimizer_hyperparams,
-          learning_rate,
-          self.regularization[1],
-          self.regularization[0]
         )
 
         callback.after_update(**locals())
@@ -649,22 +572,14 @@ class Sequential:
       ############ post training
       
       callback.after_epoch(**locals())
-      
-      # NaN detection
-      for layer_number, parameters in self.params_pytree.items():
-        for param_name, param_value in parameters.items():
-          if jnp.isnan(param_value).any():
-            raise ValueError(f"NaN detected in the {param_name} of layer {layer_number}. Training halted.")
-          if jnp.isinf(param_value).any():
-            raise ValueError(f"Infinity detected in the {param_name} of layer {layer_number}. Training halted.")
 
-      if (epoch+1) % self.logging == 0 and self.verbose >= 2 or epoch == 0:
+      if (epoch % self.logging == 0 and self.verbose >= 2) or epoch == 0:
         
-        lossROC = 0 if (epoch+1) < self.logging else epoch_loss - self.error_logs[(epoch+1)-self.logging]
-        validationROC = 0 if (epoch+1) < self.logging else validation_loss - self.validation_error_logs[(epoch+1)-self.logging] if self.validation_split > 0 else 0
-        metricROC = 0 if (epoch+1) < self.logging else metric_stats[0] - self.metrics_logs[(epoch+1)-self.logging][0] if len(self.metrics) > 0 else 0
+        lossROC       = 0 if epoch == 0 else epoch_loss      - self.error_logs[epoch-self.logging]
+        validationROC = 0 if epoch < self.logging else validation_loss - self.validation_error_logs[epoch-self.logging] if self.validation_split > 0 else 0
+        metricROC     = 0 if epoch < self.logging else metric_stats[0] - self.metrics_logs[epoch-self.logging][0] if len(self.metrics) > 0 else 0
         
-        prefix = f"\033[1mEpoch {epoch+1}/{self.epochs}\033[0m ({round( ((epoch+1)/self.epochs)*100 , 2)}%)"
+        prefix = f"\033[1mEpoch {epoch}/{self.epochs}\033[0m ({round( ((epoch)/self.epochs)*100 , 2)}%)"
         prefix += ' ' * (25 + len(f"{self.epochs}") * 2 - len(prefix))
         
         print_loss = f"Loss: {epoch_loss:.2E}" if epoch_loss > 1000 or epoch_loss < 0.00001 else f"Loss: {epoch_loss:.5f}"
@@ -691,9 +606,6 @@ class Sequential:
     
     callback.end(**locals())
 
-  def evaluate(self, features, targets, **kwargs) -> None:
-    raise NotImplementedError("The evaluate method is not implemented in NetFlash. Please use the push method to get predictions.")
-
   def push(self, inputs:jnp.ndarray) -> jnp.ndarray:
     """
     Propagates the input through the entire model, excluding dropout layers (if any).
@@ -706,7 +618,7 @@ class Sequential:
         continue
       
       layer_params = self.params_pytree.get(f'layer_{i}', {})
-      x, weighted_sum = layer.apply(layer_params, x)
+      x, _ = layer.apply(layer_params, x)
       
     return x
 

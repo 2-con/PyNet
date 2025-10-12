@@ -1,6 +1,0 @@
-
-Timeline
-Now (in progress) → research → publish → cleanup → release
-
-Things to do
-  Build NetLab

@@ -4,7 +4,7 @@ There are three core folders; flash, vanilla, and lab. one for their respective 
 """
 
 from . import flash
-from . import vanilla
+from . import static
 from . import lab
 
-__all__ = ['flash', 'vanilla', 'lab']
+__all__ = ['flash', 'static', 'lab']

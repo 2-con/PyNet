@@ -53,19 +53,19 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tools import arraytools, scaler, utility, visual
 from tools import math as math2
 
-from core.vanilla import activations as Activation
-from core.vanilla import derivatives as Derivative
-from core.vanilla import losses as Error
-from core.vanilla import metrics as Metrics
-from core.vanilla import initializations as Initialization
-from core.vanilla import parametric_derivatives as P_Derivative
-from core.vanilla.utility import *
+from core.static import activations as Activation
+from core.static import derivatives as Derivative
+from core.static import losses as Error
+from core.static import metrics as Metrics
+from core.static import initializations as Initialization
+from core.static import parametric_derivatives as P_Derivative
+from core.static.utility import *
 
 from system.config import *
 from system.defaults import *
 
-from core.vanilla.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
-import core.vanilla.optimizers as optimizers
+from core.static.layers import Convolution, Dense, Localunit, Recurrent, LSTM, GRU, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Dropout
+import core.static.optimizers as optimizers
 
 #######################################################################################################
 #                                               Extra                                                 #

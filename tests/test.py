@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.netcore as net
+import api.solonet as net
 
 import tools.arraytools as tools
 from tools.arraytools import generate_random_array
@@ -10,7 +10,7 @@ import time
 import math
 import random
 import numpy as np
-from core.vanilla.encoders import OneHotEncode
+from core.static.encoders import OneHotEncode
 from tools.visual import display_boundary
 
 start_time = time.perf_counter()
