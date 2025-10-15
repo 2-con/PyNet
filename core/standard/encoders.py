@@ -1,7 +1,5 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import jax
 import jax.numpy as jnp
 
 def SinusoidalEmbedding(raw_input):

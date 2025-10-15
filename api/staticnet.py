@@ -1,9 +1,10 @@
 """
-NetCore API
+StaticNet API
 =====
-  A high-level API for sequential models for all things machine learning, NetCore automatically handles the learning
+  A high-level API for sequential models for all things machine learning, StaticNet automatically handles the learning
   process along with hyperparameters unless specified. things such as input neurons do not need
-  to be defined and are handled automatically.
+  to be defined and are handled automatically. StaticNet relies on the StaticEngine to run all of the calculations which will be slow due
+  to the object-oriented nature of the framework.
 -----
 Provides
 -----
@@ -38,7 +39,7 @@ __package__ = "pynet"
 if __name__ == "__main__":
   print("""
         This file is not meant to be run as a main file.
-        More information can be found about PyNet's NetCore API on the documentation.
+        More information can be found about PyNet's StaticNet API on the documentation.
         system > 'docs.txt' or the GitHub repository at https://github.com/2-con/PyNet
         """)
   exit()
@@ -465,7 +466,7 @@ class Sequential:
     ======
       Sequential model where layers are processed sequentially.
       
-      Must contain NetCore layers to be added to the model. either directly through the constructor or through the add() method
+      Must contain StaticNet layers to be added to the model. either directly through the constructor or through the add() method
     -----
 
     Available layers:
@@ -513,7 +514,7 @@ class Sequential:
     -----
     Args
     -----
-    - layer (NetCore object) : the layer to add to the model
+    - layer (StaticNet object) : the layer to add to the model
     """
     if type(layer) not in (Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape, Operation, Localunit, RecurrentBlock):
       raise ValueError("layer must be of type Convolution, Dense, Maxpooling, Meanpooling, Flatten, Reshape or RecurrentBlock")

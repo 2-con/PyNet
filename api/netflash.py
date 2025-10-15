@@ -54,9 +54,9 @@ import jax
 import jax.numpy as jnp
 
 from tools import utility
-from core.flash import losses, metrics, optimizers
+from core.standard import metrics, optimizers, losses
 from core.flash.layers import *
-from core.flash.callbacks import Callback
+from core.standard.callbacks import Callback
 from core.static.utility import do_nothing
 from system.config import *
 
@@ -191,7 +191,7 @@ class Sequential:
 
     self.layers.append(layer)
 
-  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list=[], validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, *args, **kwargs):
+  def compile(self, input_shape:tuple[int, ...], optimizer:str, loss:str, learning_rate:float, epochs:int, metrics:list=[], validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, optimizer_hyperparameters:dict={}, *args, **kwargs):
     """
     Compile
     -----
@@ -270,6 +270,25 @@ class Sequential:
     self.metrics_logs = []
     
     ############################################################################################
+    #                                General Error Prevention                                  #
+    ############################################################################################
+    
+    if verbose < 0 or verbose > 4:
+      raise ValueError("Verbosity level must be between 0 and 4.")
+    if type(verbose) != int:
+      raise TypeError("Verbosity level must be an integer.")
+    if type(input_shape) != tuple:
+      raise TypeError("Input shape must be a tuple.")
+    if type(loss) != str:
+      raise TypeError("Loss function must be a string.")
+    if type(metrics) != list:
+      raise TypeError("Metrics must be a list.")
+    if type(learning_rate) != float:
+      raise TypeError("Learning rate must be a float.")
+    if type(epochs) != int:
+      raise TypeError("Epochs must be an integer.")
+    
+    ############################################################################################
     #                        Initialize model parameters and connections                       #
     ############################################################################################
     
@@ -317,14 +336,13 @@ class Sequential:
     if optimizer.lower() not in Key.OPTIMIZER:
       raise ValueError(f"Optimizer '{optimizer}' not supported.")
     
-    self.optimizer_fn = Key.OPTIMIZER[optimizer.lower()].update
-    self.optimizer_hyperparams = {} # Store all remaining kwargs as optimizer hyperparams
+    self.optimizer = Key.OPTIMIZER[optimizer.lower()](**optimizer_hyperparameters)
 
-    self.opt_state = jax.tree_util.tree_map(
+    self.opt_state = jax.tree.map(
       lambda p: Key.OPTIMIZER[optimizer.lower()].initialize(p.shape, p.dtype),
       self.params_pytree
     )
-     
+
     ############################################################################################
     #                                 Initialize loss function                                 #
     ############################################################################################
@@ -347,14 +365,15 @@ class Sequential:
         if metric not in Key.METRICS:
           raise ValueError(f"Metric '{metric}' not supported. Available: {list(Key.METRICS.keys())}")
         
-        self.metrics.append(Key.METRICS[metric])
+        self.metrics.append(Key.METRICS[metric]())
           
       else: # if its a func
         
-        self.metrics.append(metric)   
+        self.metrics.append(metric())   
         
     self.metrics = tuple(self.metrics)   
-
+    if validation_split == 0 and len(self.metrics) > 0:
+      raise ValueError("Validation split must be > 0 if metrics are used")
     self.is_compiled = True
     
     ############################################################################################
@@ -453,7 +472,7 @@ class Sequential:
     def step(
       layers_tuple:tuple,
       error:jnp.ndarray, parameters_pytree:dict, opt_state:dict, activations:jnp.ndarray, weighted_sums:jnp.ndarray, 
-      timestep:int, optimizer_hyperparams:dict) -> tuple[dict, dict]:
+      timestep:int) -> tuple[dict, dict]:
       
       for layer_index in reversed(range(len(layers_tuple))):
         layer = self.layers[layer_index]
@@ -462,17 +481,16 @@ class Sequential:
         
         error, gradients = layer.backward(layer_params, activations[layer_index], error, weighted_sums[layer_index])
         
-        gradients = losses.Loss_calculator.regularized_grad(layer_params, gradients, self.regularization[1], self.regularization[0], ignore_list=['bias', 'biases'])
+        gradients = losses.Loss_calculator.regularize_grad(layer_params, gradients, self.regularization[1], self.regularization[0], ignore_list=['bias', 'biases'])
         
         if hasattr(layer, "update"):
           parameters_pytree[f'layer_{layer_index}'], opt_state[f'layer_{layer_index}'] = layer.update(
-            self.optimizer_fn,
+            self.optimizer,
             self.learning_rate,
             layer_params,
             gradients,
             opt_state[f'layer_{layer_index}'],
             timestep=timestep, 
-            **optimizer_hyperparams
           )
           
         else:
@@ -529,7 +547,7 @@ class Sequential:
         # actual training method
         
         activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
-        epoch_loss += losses.Loss_calculator.forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree)
+        epoch_loss += Loss_calculator.forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree)
         initial_error = self.loss.backward(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         callback.before_update(**locals())
@@ -543,7 +561,6 @@ class Sequential:
           activations_and_weighted_sums['activations'],
           activations_and_weighted_sums['weighted_sums'],
           timestep,
-          self.optimizer_hyperparams,
         )
 
         callback.after_update(**locals())
@@ -551,7 +568,7 @@ class Sequential:
         self.opt_state = current_opt_state
       
       extra_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else do_nothing()
-      validation_loss = self.loss_function(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) if len(validation_features) > 0 else do_nothing()
+      validation_loss = Loss_calculator.forward_loss(validation_targets, extra_activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree) if len(validation_features) > 0 else do_nothing()
       
       metric_stats = [metric_fn(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) for metric_fn in self.metrics] if len(self.metrics) > 0 else do_nothing()
       self.metrics_logs.append(metric_stats)
@@ -594,7 +611,7 @@ class Sequential:
           print(prefix + print_loss + print_validation)
         
         elif self.verbose == 4:
-          print_metric = f"{self.metrics[0].__name__}: {metric_stats[0]:.5f}" if len(self.metrics) >= 1 else "Metrics N/A"
+          print_metric = f"{self.metrics[0].__class__.__name__}: {metric_stats[0]:.5f}" if len(self.metrics) >= 1 else "Metrics N/A"
           print_metric = f"┃ \033[32m{print_metric:16}\033[0m" if metricROC > 0 else f"┃ \033[31m{print_metric:16}\033[0m" if metricROC < 0 else f"┃ {print_metric:16}"
           
           print_validation = f"V Loss: {validation_loss:.2E}" if validation_loss > 1000 or validation_loss < 0.00001 else f"V Loss: {validation_loss:.5f}" if self.validation_split > 0 else f"V Loss: N/A"

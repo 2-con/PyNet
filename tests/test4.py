@@ -7,24 +7,27 @@ import time
 
 # Example Usage
 model = Sequential(
-  LSTM(5, "relu")
- )
+  Dense(2, 'relu'),
+  Operation("min max scaler"),
+)
 
 # Compile the model
 model.compile(
-  input_shape=(5,6),
+  input_shape=(6,),
   optimizer='adam',
   loss='mean squared error',
-  learning_rate=0.001,
-  epochs=1000,
-  batch_size=51,
-  verbose=2,
-  logging=99,
+  metrics=['accuracy'],
+  validation_split=0.2,
+  learning_rate=0.01,
+  epochs=100,
+  batch_size=1,
+  verbose=4,
+  logging=1,
 )
 
 # some dummy data for training
-features = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,5,6))
-targets = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,5,6))
+features = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,6))
+targets = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,2))
 
 # jnp.array([[0,0],[0,1],[1,0],[1,1]])
 # jnp.array([[0,1],[1,0],[1,0],[0,1]])
