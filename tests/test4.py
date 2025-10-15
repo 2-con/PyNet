@@ -7,7 +7,7 @@ import time
 
 # Example Usage
 model = Sequential(
-  Dense(2, 'relu'),
+  Dense(2, 'mish'),
   Operation("min max scaler"),
 )
 
@@ -20,8 +20,8 @@ model.compile(
   validation_split=0.2,
   learning_rate=0.01,
   epochs=100,
-  batch_size=1,
-  verbose=4,
+  batch_size=3,
+  verbose=3,
   logging=1,
 )
 

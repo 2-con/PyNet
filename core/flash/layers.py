@@ -37,7 +37,7 @@ class Key:
     "silu": activations.SiLU(),
     
     "standard scaler": activations.Standard_Scaler(),
-    "min max scaler": activations.Min_Max_Scaler(0,1),
+    "min max scaler": activations.Min_Max_Scaler(),
     "max abs scaler": activations.Max_Abs_Scaler(),
     "robust scaler": activations.Robust_Scaler(),
   }

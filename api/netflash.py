@@ -547,7 +547,7 @@ class Sequential:
         # actual training method
         
         activations_and_weighted_sums = propagate(batch_features, self.params_pytree)
-        epoch_loss += Loss_calculator.forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree)
+        epoch_loss += losses.Loss_calculator.forward_loss(batch_targets, activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree)
         initial_error = self.loss.backward(batch_targets, activations_and_weighted_sums['activations'][-1])
 
         callback.before_update(**locals())
@@ -568,7 +568,7 @@ class Sequential:
         self.opt_state = current_opt_state
       
       extra_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else do_nothing()
-      validation_loss = Loss_calculator.forward_loss(validation_targets, extra_activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree) if len(validation_features) > 0 else do_nothing()
+      validation_loss = losses.Loss_calculator.forward_loss(validation_targets, extra_activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree) if len(validation_features) > 0 else do_nothing()
       
       metric_stats = [metric_fn(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) for metric_fn in self.metrics] if len(self.metrics) > 0 else do_nothing()
       self.metrics_logs.append(metric_stats)
