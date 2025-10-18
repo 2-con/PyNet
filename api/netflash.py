@@ -55,7 +55,6 @@ import jax.numpy as jnp
 
 from tools import utility
 from core.standard import metrics, optimizers, losses
-from core.flash.layers import *
 from core.standard.callbacks import Callback
 from core.static.utility import do_nothing
 from system.config import *
@@ -298,9 +297,9 @@ class Sequential:
     # set sizes while ignoring fans
     for layer_index, layer in enumerate(self.layers):
       if layer_index == 0:
-        _, layer_size = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=1) if type(layer) in (Dense, '') else layer.calibrate(fan_in_shape=input_shape, fan_out_shape=(1,))
+        _, layer_size = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=(1,))
       else:
-        _, layer_size = layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=1) if type(layer) in (Dense, '') else layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=(1,))
+        _, layer_size = layer.calibrate(fan_in_shape=sizes[layer_index-1], fan_out_shape=(1,))
       
       sizes.append(layer_size)
     
@@ -631,11 +630,11 @@ class Sequential:
     x = inputs
     for i, layer in enumerate(self.layers):
       
-      if type(layer) is Dropout:
+      if layer.training_only:
         continue
       
       layer_params = self.params_pytree.get(f'layer_{i}', {})
-      x, _ = layer.apply(layer_params, x)
+      x, _ = layer.forward(layer_params, x)
       
     return x
 

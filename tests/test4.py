@@ -7,8 +7,9 @@ import time
 
 # Example Usage
 model = Sequential(
-  Dense(2, 'mish'),
-  Operation("min max scaler"),
+  Dense(4, "relu"),
+  Dropout(0.1, "random"),
+  Dense(4, "relu"),
 )
 
 # Compile the model
@@ -27,7 +28,7 @@ model.compile(
 
 # some dummy data for training
 features = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,6))
-targets = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,2))
+targets = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(100,4))
 
 # jnp.array([[0,0],[0,1],[1,0],[1,1]])
 # jnp.array([[0,1],[1,0],[1,0],[0,1]])
@@ -36,6 +37,7 @@ targets = jax.random.uniform(key=jax.random.key(1), minval=0, maxval=10, shape=(
 start = time.perf_counter()
 
 model.fit(features, targets) 
+model.push(features)
 
 print(f"""
       Finished training in {time.perf_counter() - start} seconds

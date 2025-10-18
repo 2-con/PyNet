@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 
 import jax
 import jax.numpy as jnp
-import typing
 import random
 
 # for type checking
@@ -15,6 +14,7 @@ from system.config import *
 from core.static.utility import do_nothing
 
 class Layer(ABC):
+  training_only=False
   """
   Base class for all layers
   
@@ -121,26 +121,33 @@ class Layer(ABC):
     pass
 
 class Dense(Layer):
-  def __init__(self, neurons:int, activation:Function, name:str="", initializer:Initializer=Default(), *args, **kwargs):
+  training_only=False
+  def __init__(self, neurons:int, function:Function, name:str="", initializer:Initializer=Default(), *args, **kwargs):
     """
-    Dense
+    Initialize a Dense layer
     -----
-      A fully connected layer that connects the previous layer to the next layer. Accepts and returns 1D arrays (excludes batch dimension), so input_shape should be of the form
-      (input_size,), anything after the 1st dimention will be ignored.
+      A fully connected layer that accepts and returns 1D arrays with an input shape (input_size,) excluding batch dimension.
+      higher dimentions specified will not be flattened automatically and return an error instead.
+    -----
+    Args
+    -----
+    - neurons                (int)         : the number of neurons in the layer
+    - function               (Function)    : the function function
+    - (Optional) name        (str)         : the name of the layer
+    - (Optional) initializer (Initializer) : intializer for the weights, defaults to Default
+    - (Optional) *args                     : variable length argument list
+    - (Optional) **kwargs                  : arbitrary keyword arguments
     """
     self.neuron_amount = neurons
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
 
-    self.input_size = None
-
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
-    self.input_size = fan_in_shape[0]
-    weights = self.initializer((self.input_size, self.neuron_amount), fan_in_shape[0], fan_out_shape)
+    weights = self.initializer((fan_in_shape[0], self.neuron_amount), fan_in_shape[0], fan_out_shape[0])
     biases = jnp.zeros((self.neuron_amount,))
     paremetric_parameters = {
-      paramater_name: self.initializer((self.neuron_amount,), fan_in_shape[0], fan_out_shape) for paramater_name in self.function.parameters
+      paramater_name: self.initializer((self.neuron_amount,), fan_in_shape[0], fan_out_shape[0]) for paramater_name in self.function.parameters
     }
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.neuron_amount,)
@@ -195,21 +202,29 @@ class Dense(Layer):
     return updated_params, new_opt_state
 
 class Localunit(Layer):
-  def __init__(self, receptive_field:int, activation:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, receptive_field:int, function:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
-    LocalUnit (Locally Connected Layer)
+    Localunit (Locally Connected Layer)
     -----
-      A locally connected layer that connects the previous layer to the next layer. Accepts and returns 1D arrays (excludes batch dimension), so input_shape should be of the form
-      (input_size,), anything after the 1st dimention will be ignored.
+      A locally connected layer that accepts and returns 1D arrays with an input shape (input_size,) excluding batch dimension.
+      higher dimentions specified will not be flattened automatically and return an error instead.
+    -----
+    Args
+    -----
+    - receptive_field        (int)         : the size of the receptive field for each neuron
+    - function               (Function)    : the activation function
+    - (Optional) name        (str)         : the name of the layer
+    - (Optional) initializer (Initializer) : intializer for the weights, defaults to Default
+    - (Optional) *args                     : variable length argument list
+    - (Optional) **kwargs                  : arbitrary keyword arguments
     """
     self.receptive_field = receptive_field
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
 
-    self.input_size = None
-
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int, ...]]:
     
     # generating the slide pattern
     ans = []
@@ -220,22 +235,22 @@ class Localunit(Layer):
     if self.receptive_field < 0 or fan_in[0] < 0:
       raise ValueError("Width or field size must be non-negative.")
     
+    # mask builder
     for i in range(height):
       row = [0 for _ in range(fan_in[0])]
       for j in range(fan_in[0]):
         if j+i < fan_in[0] and j+i >= i and j < self.receptive_field:
           row[j+i] = 1
-      
       ans.append(row)
 
     # permanent localunit weight mask
     self.mask = jnp.array(ans).T
     
     self.input_size = fan_in[0]
-    weights = self.initializer((self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape)
+    weights = self.initializer((self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape[0])
     biases = jnp.zeros((self.mask.shape[1],))
     paremetric_parameters = {
-      paramater_name: self.initializer((self.mask.shape[0],), fan_in[0], fan_out_shape) for paramater_name in self.function.parameters
+      paramater_name: self.initializer((self.mask.shape[0],), fan_in[0], fan_out_shape[0]) for paramater_name in self.function.parameters
     }
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.mask.shape[0],)
@@ -289,19 +304,30 @@ class Localunit(Layer):
     return updated_params, new_opt_state
 
 class Convolution(Layer):
-  def __init__(self, kernel:tuple[int, int], channels:int, activation:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, kernel:tuple[int, int], channels:int, function:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Convolution
-    -----
-      Convolution that is fixed with a valid padding and no dilation. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
-      (Channels, Image Height, Image Width).
+    ---------
+      a Convolution layer within the context of deep learning is actually cross correlation. 
+      Accepts and returns 3D arrays with the shape (Incoming Channels, Image Height, Image Width) excluding the batch dimension.
+    ---------
+    Args
+    ---------
+    - kernel                 (tuple[int, int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
+    - channels               (int)             : the number of channels to output
+    - stride                 (tuple[int, int]) : the 2D stride to apply to the kernel
+    - function               (Function)        : the activation function
+    - (Optional) name        (str)             : the name of the layer
+    - (Optional) initializer (Initializer)     : intializer for the weights, defaults to Default
+    - (Optional) *args                         : variable length argument list
+    - (Optional) **kwargs                      : arbitrary keyword arguments
     """
-    
     self.kernel = kernel
     self.channels = channels
     self.stride = stride
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
     self.params = {}
     self.input_shape = None
@@ -464,21 +490,31 @@ class Convolution(Layer):
     return updated_params, new_opt_state
 
 class Deconvolution(Layer):
-  def __init__(self, kernel:tuple[int, int], channels:int, activation:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, kernel:tuple[int, int], channels:int, function:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Deconvolution
-    -----
-      a Deconvolution layer within the context of deep learning is actually a transposed convolution. Accepts and returns 3D arrays (excludes batch dimension), so input_shape should be of the form
-      (Channels, Image Height, Image Width).
+    ---------
+      a Deconvolution layer within the context of deep learning is actually an upscaler, simmilar to Convolution with a flipped direction.
+      Accepts and returns 3D arrays with the shape (Incoming Channels, Image Height, Image Width) excluding the batch dimension.
+    ---------
+    Args
+    ---------
+    - kernel                 (tuple[int, int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
+    - channels               (int)             : the number of channels to output
+    - stride                 (tuple[int, int]) : the 2D stride to apply to the kernel
+    - function               (Function)        : the activation function
+    - (Optional) name        (str)             : the name of the layer
+    - (Optional) initializer (Initializer)     : intializer for the weights, defaults to Default
+    - (Optional) *args                         : variable length argument list
+    - (Optional) **kwargs                      : arbitrary keyword arguments
     """
-    
     self.kernel = kernel
     self.channels = channels
     self.name = name
     self.stride = stride
-    self.function = activation
+    self.function = function
     self.initializer = initializer
-    self.params = {}
     self.input_shape = None
     self.output_shape = None
 
@@ -488,8 +524,9 @@ class Deconvolution(Layer):
     
     sH, sW = self.stride
     kH, kW = self.kernel
-
-    self.params["weights"] = self.initializer(
+    params = {}
+    
+    params["weights"] = self.initializer(
       (self.channels, C_in, *self.kernel),
       C_in * kH * kW,
       fan_out_shape,
@@ -497,13 +534,12 @@ class Deconvolution(Layer):
     out_H = (H + kH) * sH - 1
     out_W = (W + kW) * sW - 1
 
-    self.params["biases"] = jnp.zeros((self.channels, out_H, out_W))
+    params["biases"] = jnp.zeros((self.channels, out_H, out_W))
     
     parametrics = {
       name: self.initializer((self.channels,), C_in * kH * kW, fan_out_shape) for name in self.function.parameters
     }
-
-    return self.params.update(parametrics), (self.channels, out_H, out_W)
+    return {**params, **parametrics} , (self.channels, out_H, out_W)
 
   def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     if inputs.ndim != 4:
@@ -622,16 +658,26 @@ class Deconvolution(Layer):
     return updated_params, new_opt_state
 
 class Recurrent(Layer):
-  def __init__(self, cells:int, activation:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Recurrent
     -----
-      Recurrent layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
-      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+      A Recurrent layer that processes sequences of data, the input format should be a 2D array with an input shape of (sequence_length, features) excluding the batch dimension. 
+      The layer maintains the shape of the hidden state throughout the sequence.
+    -----
+    Args
+    -----
+    - cells                       (int)           : the number of cells in the layer
+    - function                    (Function)      : the activation activation for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) initializer      (Initializer)   : intializer for the weights, defaults to Default
+    - (Optional) name             (string)        : the name of the layer
     """
     self.cells = cells
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -777,17 +823,26 @@ class Recurrent(Layer):
     return updated_params, new_opt_state
 
 class LSTM(Layer):
-  def __init__(self, cells:int, activation:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     LSTM (Long Short-Term Memory)
     -----
-      a Long Short-Term Memory layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
-      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+      A Long Short-Term Memory layer that processes sequences of data, the input format should be a 2D array with an input shape of (sequence_length, features) excluding the batch dimension. 
+      The layer maintains the shape of the hidden state throughout the sequence.
+    -----
+    Args
+    -----
+    - cells                       (int)           : the number of cells in the layer
+    - function                    (Function)      : the activation function for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) initializer      (Initializer)   : the initializer for the layer
+    - (Optional) name             (string)        : the name of the layer
     """
-    
     self.cells = cells
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -1086,16 +1141,26 @@ class LSTM(Layer):
     return updated_params, new_opt_state
 
 class GRU(Layer):
-  def __init__(self, cells:int, activation:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     GRU (Gated Recurrent Unit)
     -----
-      A Gated Recurrent Unit layer that processes sequences of data, the input format should be a 2D array (excludes batch dimension), so input_shape should be of the form
-      (sequence_length, features). The layer processes the input sequence sequence_length by sequence_length, maintaining a hidden state of size features.
+      A Gated Recurrent Unit layer that processes sequences of data, the input format should be a 2D array with an input shape of (sequence_length, features) excluding the batch dimension. 
+      The layer maintains the shape of the hidden state throughout the sequence.
+    -----
+    Args
+    -----
+    - cells                       (int)           : the number of cells in the layer
+    - function                    (Function)      : the activation function for the layer
+    - (Optional) input_sequence   (tuple of int)  : indices of cells that receive input from the input sequence, all cells receive input by default
+    - (Optional) output_sequence  (tuple of int)  : indices of cells that output to the next layer, all cells output by default
+    - (Optional) initializer      (Initializer)   : the initializer for the layer
+    - (Optional) name             (string)        : the name of the layer
     """
     self.cells = cells
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
@@ -1364,7 +1429,8 @@ class GRU(Layer):
     return updated_params, new_opt_state
 
 class Attention(Layer):
-  def __init__(self, heads:int, activation:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  training_only=False
+  def __init__(self, heads:int, function:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Multiheaded Self-Attention
     -----
@@ -1373,19 +1439,20 @@ class Attention(Layer):
     -----
     Args
     -----
-    - heads           (int)     : the number of attention heads
-    - FUNCTION      (string)  : the FUNCTION function applied to the output
-    - (Optional) name (string)  : the name of the layer
+    - heads                  (int)          : the number of attention heads
+    - function               (Function)     : the activation function for the layer
+    - (Optional) initializer (Initializer)  : the initializer for the layer
+    - (Optional) name        (string)       : the name of the layer
     """
     self.heads = heads
     self.name = name
-    self.function = activation
+    self.function = function
     self.initializer = initializer
 
   def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
     """
     fan_in_shape: (features, sequence_length)
-    fan_out_shape: (features_out, sequence_length_out) - we preserve length
+    fan_out_shape: (features_out, sequence_length_out)
     """
     features, sequence_length = fan_in_shape
     params = {}
@@ -1410,14 +1477,15 @@ class Attention(Layer):
     parametrics = {
       parameter_name: self.initializer((sequence_length,), features, fan_out_shape[0]) for parameter_name in self.function.parameters
     }
-
-    return params.update(parametrics), (features, sequence_length)
+    
+    return {**params, **parametrics}, (features, sequence_length)
 
   def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     batch_size, features, seq_len = inputs.shape
     per_batch_outputs = []
     per_batch_WS = []
 
+    # for features, sequence in zip(inputs)
     for n in range(batch_size):  # process one batch at a time
       batch_input = inputs[n]  # (seq_len, features)
       head_outputs = []
@@ -1472,6 +1540,7 @@ class Attention(Layer):
     }
 
     input_grads = jnp.zeros_like(inputs)
+    upstream_grads = jnp.zeros_like(inputs)
 
     # process per batch
     for n in range(batch_size):
@@ -1535,7 +1604,7 @@ class Attention(Layer):
       # assign input grads for this batch
       upstream_grads = upstream_grads.at[n].set(d_input_total)
 
-    return upstream_grads, grads.update(parametrics)
+    return upstream_grads, {**grads, **parametrics}
 
   @staticmethod
   def update(optimizer, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, *args, **kwargs) -> dict:
@@ -1543,6 +1612,7 @@ class Attention(Layer):
     new_opt_state = {}
     
     for cell_key, cell_params in layer_params.items():
+      
       cell_grads = gradients[cell_key]
       new_cell_params = {}
       new_cell_opt_state = {}
@@ -1565,11 +1635,13 @@ class Attention(Layer):
 # functional layers
 
 class MaxPooling(Layer):
+  training_only=False
   def __init__(self, pool_size:tuple[int, int], strides:tuple[int, int], name:str="", *args, **kwargs):
     """
     Max Pooling
     -----
-      A layer that performs max pooling on a 2D input while adjusting to channel dimensions. make sure to set the input shape in the format (Channels, Height, Width).
+      A layer that performs max pooling on a 2D input while adjusting to channel dimensions. 
+      accepts a 3D/2D input shape of (Channels, Height, Width).
     -----
     Args
     -----
@@ -1630,11 +1702,13 @@ class MaxPooling(Layer):
     return upstream_gradient, {}
 
 class MeanPooling(Layer):
+  training_only=False
   def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="", *args, **kwargs):
     """
     Mean Pooling
     -----
-      A layer that performs mean pooling on a 2D input while adjusting to channel dimensions. make sure to set the input shape in the format (Channels, Height, Width).
+      A layer that performs mean pooling on a 2D input while adjusting to channel dimensions. 
+      accepts a 3D/2D input shape of (Channels, Height, Width).
     -----
     Args
     -----
@@ -1690,12 +1764,12 @@ class MeanPooling(Layer):
     return upstream_gradient, {}
 
 class Flatten(Layer):
+  training_only=False
   def __init__(self, name:str="", *args, **kwargs):
     """
     Flatten
     -----
-      A layer that flattens any ndim input into a 1D input while adjusting to batch dimensions. 
-      make sure to set the input shape in the format (Channels, Height, Width).
+      A layer that flattens any ndim input into a 1D while accounting for the batch dimension. 
     -----
     Args
     -----
@@ -1721,25 +1795,26 @@ class Flatten(Layer):
     return upstream_gradient, {}
 
 class Operation(Layer):
+  training_only=False
   def __init__(self, function:Function, name:str="", *args, **kwargs):
     """
     Operation
     -----
       A layer that performs an operation on any ndim input while preserving shape. 
-      this layer auto-adjusts and does not need to a fixed input shape, but make sure to set the input shape in the format that the operation expects.
+      this layer automatically adjusts and does not need to a fixed input shape, but make sure to set the input shape in the format that the operation expects.
     """
     self.function = function
     self.name = name
   
   def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
     
-    # idk if there should be basic checking in the standard layer or if that is API spesific
+    # idk if there should be basic checking in the standard layer or if that is the API's spesific responsibility
     
-    # if self.operation(jnp.zeros(fan_in_shape)).shape != fan_in_shape:
-    #   raise SystemError(f"Operation layer '{self.name}' operation function does not preserve shape: {fan_in_shape} -> {self.operation(jnp.zeros_like(fan_in_shape)).shape}")
+    if self.operation(jnp.zeros(fan_in_shape)).shape != fan_in_shape:
+      raise SystemError(f"Operation layer '{self.name}' operation function does not preserve shape: {fan_in_shape} -> {self.operation(jnp.zeros_like(fan_in_shape)).shape}")
     
-    # if len(self.operation_object.parameters) > 0:
-    #   raise SystemError(f"Operation function has parameters: {self.operation_object.paremeters}")
+    if len(self.operation_object.parameters) > 0:
+      raise SystemError(f"Operation function has parameters: {self.operation_object.paremeters}")
     
     return {}, fan_in_shape
   
@@ -1750,22 +1825,19 @@ class Operation(Layer):
     return self.function.backward(error, weighted_sums), {}
 
 class Dropout(Layer):
+  training_only=True
   def __init__(self, rate:float, mode:str, name:str="", *args, **kwargs):
     """
     Dropout
     -----
       A layer that randomly sets a fraction rate of its inputs to zero during training time
-      and scales up its activations by a factor of 1/(1-rate) during test time.
+      and scales up its functions by a factor of 1/(1-rate) during test time.
     -----
     Args
     -----
     - rate            (float)  : the fraction of the input units to drop
-    - mode            (string) : the mode of dropout, either 'random' or 'fixed'
+    - mode            (string) : the mode of dropout, either 'random' where each unit is dropped independently of eachother in accordance to the dropout rate or 'fixed' where a fixed number of units are dropped in accordance to the dropout rate
     - (Optional) name (string) : the name of the layer
-    ---
-    Modes:
-    - 'random' : each unit is dropped independently of eachother in accordance to the dropout rate
-    - 'fixed'   : a fixed number of units are dropped in accordance to the dropout rate
     """
     if not (0.0 <= rate < 1.0):
       raise ValueError("Dropout rate must be in the range [0.0, 1.0)")
@@ -1802,6 +1874,7 @@ class Dropout(Layer):
     return error * weighted_sums / (1.0 - self.rate), {}
 
 class Reshape(Layer):
+  training_only=False
   def __init__(self, target_shape:tuple[int, ...], name:str="", *args, **kwargs):
     """
     Reshape
