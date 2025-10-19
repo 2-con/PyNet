@@ -28,9 +28,6 @@ class Callback:
   def before_epoch(callbackself, *args, **kwargs):
     pass
   
-  def before_update(callbackself, *args, **kwargs):
-    pass
-  
   def after_update(callbackself, *args, **kwargs):
     pass
   

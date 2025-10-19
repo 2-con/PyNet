@@ -127,9 +127,7 @@ class Loss_calculator:
       
     return gradients
 
-
-
-class Mean_squared_error(Loss):
+class Mean_Squared_Error(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean(jnp.square(y_true - y_pred))
@@ -138,18 +136,18 @@ class Mean_squared_error(Loss):
   def backward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return 2 * (y_pred - y_true) / y_true.size
 
-class Root_mean_squared_error(Loss):
+class Root_Mean_Squared_Error(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
-    return jnp.sqrt(Mean_squared_error.forward(y_true, y_pred))
+    return jnp.sqrt(Mean_Squared_Error.forward(y_true, y_pred))
   
   @staticmethod
   def backward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
-    mse_grad = Mean_squared_error.backward(y_true, y_pred)
-    mse = Mean_squared_error.forward(y_true, y_pred)
+    mse_grad = Mean_Squared_Error.backward(y_true, y_pred)
+    mse = Mean_Squared_Error.forward(y_true, y_pred)
     return mse_grad / (2 * jnp.sqrt(mse))
 
-class Mean_absolute_error(Loss):
+class Mean_Absolute_Error(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean(jnp.abs(y_true - y_pred))
@@ -158,7 +156,7 @@ class Mean_absolute_error(Loss):
   def backward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean(jnp.sign(y_pred - y_true))
 
-class Total_squared_error(Loss):
+class Total_Squared_Error(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.sum(jnp.square(y_true - y_pred)) / 2.0
@@ -167,7 +165,7 @@ class Total_squared_error(Loss):
   def backward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return (y_pred - y_true)
 
-class Total_absolute_error(Loss):
+class Total_Absolute_Error(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.sum(jnp.abs(y_true - y_pred))
@@ -176,7 +174,7 @@ class Total_absolute_error(Loss):
   def backward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.sign(y_pred - y_true)
 
-class L1_loss(Loss):
+class L1_Loss(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean(jnp.abs(y_pred - y_true))
@@ -186,7 +184,7 @@ class L1_loss(Loss):
     return jnp.mean(jnp.sign(y_pred - y_true))
 
 # classification loss functions
-class Categorical_crossentropy(Loss):
+class Categorical_Crossentropy(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     epsilon = 1e-15
@@ -199,7 +197,7 @@ class Categorical_crossentropy(Loss):
     y_pred = jnp.clip(y_pred, epsilon, 1.0 - epsilon)
     return -y_true / y_pred
 
-class Sparse_categorical_crossentropy(Loss):
+class Sparse_Categorical_Crossentropy(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     epsilon = 1e-15
@@ -217,7 +215,7 @@ class Sparse_categorical_crossentropy(Loss):
     
     return -(one_hot_labels / y_pred)
 
-class Binary_crossentropy(Loss):
+class Binary_Crossentropy(Loss):
   @staticmethod
   def forward(y_true: jnp.ndarray, y_pred: jnp.ndarray) -> jnp.ndarray:
     epsilon = 1e-15

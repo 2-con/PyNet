@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
 import random
+import functools
 
 # for type checking
 from core.standard.functions import Function
@@ -710,39 +711,57 @@ class Recurrent(Layer):
     batches, seq_len, features = inputs.shape
     per_batch_output = []
     per_batch_WS = []
+    
+    params = jax.tree.map(
+      lambda *arrs: jnp.stack(arrs), # Stacks all arrays from all cells
+      *[params[f'cell_{i}'] for i in range(self.cells)]
+    )
+    
+    # arg 1: input carry AND weighted sums
+    # arg 2: index AND cell input (input vector)
+    @jax.jit
+    def cell_calculations(input_carry_and_weighted_sums, index_and_params_and_cell_input):
+      input_carry = jnp.where(
+        index_and_params_and_cell_input[0] == 0,
+        jnp.zeros(features),
+        input_carry_and_weighted_sums[0]
+      )
 
-    for n in range(batches):
-      input_carry = jnp.zeros(features)
+      cell_params = jax.tree.map(lambda arr: arr[index_and_params_and_cell_input[0]], params)
+
+      weighted_input = index_and_params_and_cell_input[1] * cell_params['input_weights']
+      weighted_carry = input_carry  * cell_params['carry_weights']
+
+      merged = jnp.concatenate((weighted_carry, weighted_input)) + cell_params['final_bias']
+
+      output_carry = self.function.forward(merged @ cell_params['final_weights'], **cell_params)
+ 
+      return [output_carry, merged], output_carry
+  
+    input_layer_data = [      
+      [
+        [cell_index, (cell_input if cell_index in self.input_sequence else cell_input)] for cell_index, cell_input in enumerate(batch_input)
+      ] for batch_input in inputs
+    ]
+    
+    for batch_input in input_layer_data:
       weighted_sums = []
       outputs = []
-
-      for cell_index in range(self.cells):
-        input_carry = jnp.zeros(features) if cell_index == 0 else output_carry
-        cell_params = params[f'cell_{cell_index}']
-
-        input_vector = jnp.zeros(features)
+      
+      output_carry = jnp.zeros(features)
+      merged = jnp.zeros(features)
+      for cell_input in batch_input:
+        (output_carry, merged), output = cell_calculations((output_carry, merged), cell_input)
         
-        if cell_index in self.input_sequence:
-          input_feature_idx = self.input_sequence.index(cell_index)
-          input_vector = inputs[n, input_feature_idx, :]  # take entire sequence
-
-        weighted_input = input_vector * cell_params['input_weights']
-        weighted_carry = input_carry  * cell_params['carry_weights']
-
-        merged = jnp.concatenate((weighted_carry, weighted_input)) + cell_params['final_bias']
-
-        output_carry = self.function.forward(merged @ cell_params['final_weights'], **cell_params)
-        weighted_sums.append([
-          merged, merged @ cell_params['final_weights']
-          ])
-
-        outputs.append(output_carry) if cell_index in self.output_sequence else do_nothing()
-
+        weighted_sums.append(jnp.array(merged))
+        outputs.append(output) if cell_input[0] in self.output_sequence else None
+      
       per_batch_output.append(outputs)
       per_batch_WS.append(weighted_sums)
-
+          
     return jnp.array(per_batch_output), per_batch_WS
 
+  # @functools.partial(jax.jit, static_argnums=(0,))
   def backward(self, params:dict, inputs:jnp.ndarray, error:jnp.ndarray, weighted_sums:jnp.ndarray) -> tuple[jnp.ndarray, dict]:
     batches, seq_len, features = inputs.shape
     grads = {k: {
@@ -760,9 +779,10 @@ class Recurrent(Layer):
       for cell_index in reversed(range(self.cells)):
         
         cell_params = params[f'cell_{cell_index}']
-        final_input = weighted_sums[n][cell_index][0]
-        WS = weighted_sums[n][cell_index][1]
-
+        final_input = weighted_sums[n][cell_index]
+        
+        WS = final_input @ cell_params['final_weights']
+        
         local_error = error[n, cell_index] + grad_carry
         
         all_grads = self.function.backward(local_error, WS)
@@ -796,6 +816,7 @@ class Recurrent(Layer):
         grad_carry = grads_z @ cell_params['carry_weights'].T
 
     return input_grads, grads
+
 
   @staticmethod
   def update(optimizer, learning_rate, layer_params:dict, gradients:jnp.ndarray, opt_state:dict, *args, **kwargs) -> dict:
