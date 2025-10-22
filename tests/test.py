@@ -1,9 +1,8 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import api.solonet as net
+import api.staticnet as net
 
-import tools.arraytools as tools
 from tools.arraytools import generate_random_array
 import matplotlib.pyplot as plt
 import time
@@ -14,7 +13,7 @@ from core.static.encoders import OneHotEncode
 from tools.visual import display_boundary
 
 start_time = time.perf_counter()
-test = 8
+test = 7
 
 if test == 1: # CNN
 
@@ -238,53 +237,6 @@ elif test == 5: # GRU
   for feature, target in zip(training_features, training_target):
     print(f"pred {model.push(feature)} true {target}")
 
-elif test == 6: # Paralellization test
-  
-  training_features = [
-    
-    generate_random_array(5)
-    
-  ]
-
-  training_target = [
-    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  ]
-  
-  model = net.Sequential( 
-    net.Parallel(
-      net.Dense(5, 'elu'),
-      net.Dense(5, 'elu'),
-      net.Dense(5, 'elu'),
-    ),
-    net.Parallel(
-      net.Dense(5, 'elu'),
-      net.Dense(5, 'elu'),
-      net.Dense(5, 'elu'),
-    ),
-    net.Merge('total'),
-    net.Dense(10, 'none'),
-    net.Operation('softmax')
-  )
-
-  model.compile(
-    optimizer='adam', 
-    loss='mean squared error', 
-    learning_rate=0.01,
-    batch_size=1,
-    epochs=500,
-    metrics=['accuracy'],
-    verbose=6,
-    logging=100
-  )
-  
-  model.fit(
-    training_features, 
-    training_target, 
-  )
-  
-  for feature, target in zip(training_features, training_target):
-    print(f"pred {model.push(feature)} true {target}")
-
 elif test == 7: # 1D test
 
   def dataset(num_samples, input_dimensions, output_dimensions, noise_strength):
@@ -412,18 +364,18 @@ elif test == 7: # 1D test
   #                       for x in training_features ]
   
   model = net.Sequential(
-    net.Dense(10, 'elu'),
+    net.Dense(10, 'leaky relu'),
     net.Dense(1, 'none'),
   )
 
   model.compile(
     optimizer='adam', 
     loss='mean squared error', 
-    learning_rate=0.005,
+    learning_rate=0.001,
     batch_size=1,
-    epochs=10000, 
+    epochs=1000, 
     metrics=['accuracy'],
-    logging=100,
+    logging=10,
     verbose=4
   )
 

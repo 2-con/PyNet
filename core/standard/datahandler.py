@@ -52,7 +52,7 @@ def split_data(features:jnp.ndarray, targets:jnp.ndarray, split:float):
     (1st set features, 1st set targets)
   """
   
-  if not 0 < split < 1:
+  if not 0 <= split <= 1:
     raise ValueError("Split must be between 0 and 1")
   
   return jnp.asarray(features[0:int(len(features)*split)]), jnp.asarray(targets[0:int(len(targets)*split)])

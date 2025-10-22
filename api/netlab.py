@@ -26,7 +26,29 @@ if __name__ == "__main__":
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import jax
-import jax.numpy as jnp
-
+class Sample:
+  def __init__(self, *args):
+    self.models = args
+    
+    self.logs = {}
+  
+  def procedure(self, *args):
+    self.procedures = args
+    ...
+    
+  def config(self, name, cycles, *args, **kwargs):
+    ...
+  
+  def run(self, dataset):
+    
+    # cydle through the datasets
+    ...
+    
+    """
+    
+    d = {
+      [feature, target]
+    }
+    
+    """
 

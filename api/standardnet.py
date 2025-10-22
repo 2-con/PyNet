@@ -51,6 +51,7 @@ yes, i've tried to fix it for hours and it still doesn't work.
 #######################################################################################################
 
 class Sequential:
+  __api__ = "StandardNet"
   # pre-processing
 
   def __init__(self, *args):
@@ -198,6 +199,13 @@ class Sequential:
     self.verbose = verbose
     self.logging = logging
     
+    self.callback = kwargs.get('callback', callbacks.Callback)
+    self.optimizer = optimizer
+    self.loss = loss
+    self.validation_split = validation_split
+    self.metrics = tuple([m for m in metrics])
+    self.regularization = kwargs.get('regularization', ["None", 1])
+    
     self.error_logs = []
     self.validation_error_logs = []
     self.metrics_logs = []
@@ -219,6 +227,10 @@ class Sequential:
       raise TypeError("Learning rate must be a float.")
     if type(epochs) != int:
       raise TypeError("Epochs must be an integer.")
+    if not (0 <= validation_split < 1):
+      raise ValueError("validation_split must be between [0,1)")
+    if validation_split == 0 and len(self.metrics) > 0:
+      raise ValueError("Validation split must be > 0 if metrics are used")
     
     ############################################################################################
     #                        Initialize model parameters and connections                       #
@@ -265,52 +277,10 @@ class Sequential:
     #                                  Initialize optimizer                                    #
     ############################################################################################
     
-    self.optimizer = optimizer(**optimizer_hyperparameters)
-
     self.opt_state = jax.tree.map(
       lambda p: self.optimizer.initialize(p.shape, p.dtype),
       self.params_pytree
     )
-
-    ############################################################################################
-    #                                 Initialize loss function                                 #
-    ############################################################################################
-    
-    self.loss = loss
-    
-    ############################################################################################
-    #                                 Initialize metrics                                       #
-    ############################################################################################
-        
-    self.metrics = tuple([m for m in metrics])
-    
-    if validation_split == 0 and len(self.metrics) > 0:
-      raise ValueError("Validation split must be > 0 if metrics are used")
-    
-    ############################################################################################
-    #                          Initialize Valdation (if applicable)                            #
-    ############################################################################################
-    
-    if 0 <= validation_split < 1:
-      self.validation_split = validation_split
-    else:
-      raise ValueError("validation_split must be between [0,1)")
-    
-    ############################################################################################
-    #                                        Callbacks                                         #
-    ############################################################################################
-    
-    self.callback = kwargs.get('callback', callbacks.Callback)
-    
-    #############################################################################################
-    #                                     Regularization                                        #
-    #############################################################################################
-    
-    self.regularization = kwargs.get('regularization', [None, 0])
-    if self.regularization[0] not in (None, "L1", "L2"):
-      raise ValueError("regularization type must be either None, 'L1' or 'L2'")
-    if type(self.regularization[1]) not in (int, float) or self.regularization[1] < 0:
-      raise ValueError("regularization lambda must be a non-negative number")
     
   def fit(self, features:jnp.ndarray, targets:jnp.ndarray):
     """
@@ -330,9 +300,8 @@ class Sequential:
     
     if not self.is_compiled:
       raise RuntimeError("Model is not compiled. Call .compile() first.")
-
     if not isinstance(features, jnp.ndarray) or not isinstance(targets, jnp.ndarray):
-      raise TypeError("features and targets must be NumPy arrays.")
+      raise TypeError("features and targets must be JAX NumPy arrays.")
     if features.shape[0] == 0 or targets.shape[0] == 0:
       raise ValueError("features or targets must not be empty.")
     if features.shape[0] != targets.shape[0]:
@@ -430,6 +399,9 @@ class Sequential:
     
     scan_data = datahandler.batch_data(self.batchsize, features, targets)
     
+    self.gradients_history = {}
+    self.params_history = {}
+    
     #############################################################################################
     #                                           Main                                            #
     #############################################################################################
@@ -438,22 +410,28 @@ class Sequential:
 
       callback.before_epoch(**locals())
 
-      (self.params_pytree, self.opt_state, epoch_loss, _), _ = jax.lax.scan(
+      (self.params_pytree, self.opt_state, batch_loss, _), _ = jax.lax.scan(
         epoch_batch_step,
         (self.params_pytree, self.opt_state, 0.0, 0), # initial carry
         scan_data
       )
       
+      self.gradients_history[f"epoch_{epoch}"] = jax.tree.map(lambda x: x[0], self.opt_state)
+      self.params_history[f"epoch_{epoch}"] = self.params_pytree
+      
       extra_activations_and_weighted_sums = propagate(validation_features, self.params_pytree) if len(validation_features) > 0 else None
-      validation_loss = losses.Loss_calculator.forward_loss(validation_targets, extra_activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree) if len(validation_features) > 0 else None
+      validation_loss = losses.Loss_calculator.forward_loss(validation_targets, extra_activations_and_weighted_sums['activations'][-1], self.loss, self.regularization[1], self.regularization[0], self.params_pytree) if len(validation_features) > 0 else 0
       
       metric_stats = [metric_fn(validation_targets, extra_activations_and_weighted_sums['activations'][-1]) for metric_fn in self.metrics] if len(self.metrics) > 0 else None
       self.metrics_logs.append(metric_stats)
       
-      epoch_loss /= len(features)
-      validation_loss /= len(features)
+      batch_loss /= self.batchsize
       
-      self.error_logs.append(epoch_loss)
+      # print(validation_loss)
+      
+      validation_loss /= self.batchsize
+      
+      self.error_logs.append(batch_loss)
       self.validation_error_logs.append(validation_loss) if len(validation_features) > 0 else None
       
       ############ post training
@@ -462,14 +440,14 @@ class Sequential:
 
       if (epoch % self.logging == 0 and self.verbose >= 2) or epoch == 0:
         
-        lossROC       = 0 if epoch == 0 else epoch_loss      - self.error_logs[epoch-self.logging]
+        lossROC       = 0 if epoch == 0 else batch_loss      - self.error_logs[epoch-self.logging]
         validationROC = 0 if epoch < self.logging else validation_loss - self.validation_error_logs[epoch-self.logging] if self.validation_split > 0 else 0
         metricROC     = 0 if epoch < self.logging else metric_stats[0] - self.metrics_logs[epoch-self.logging][0] if len(self.metrics) > 0 else 0
         
         prefix = f"\033[1mEpoch {epoch}/{self.epochs}\033[0m ({round( ((epoch)/self.epochs)*100 , 2)}%)"
         prefix += ' ' * (25 + len(f"{self.epochs}") * 2 - len(prefix))
         
-        print_loss = f"Loss: {epoch_loss:.2E}" if epoch_loss > 1000 or epoch_loss < 0.0001 else f"Loss: {epoch_loss:.4f}"
+        print_loss = f"Loss: {batch_loss:.2E}" if batch_loss > 1000 or batch_loss < 0.0001 else f"Loss: {batch_loss:.4f}"
         print_loss = f"┃ \033[32m{print_loss:16}\033[0m" if lossROC < 0 else f"┃ \033[31m{print_loss:16}\033[0m" if lossROC > 0 else f"┃ {print_loss:16}"
         
         if self.verbose == 2:
@@ -490,9 +468,6 @@ class Sequential:
           print(prefix + print_loss + print_validation + print_metric)
     
     callback.end(**locals())
-    
-    self.latest_params = self.params_pytree
-    self.latest_gradients = jax.tree.map(lambda x: x[0], self.opt_state)
 
   def push(self, inputs:jnp.ndarray) -> jnp.ndarray:
     """

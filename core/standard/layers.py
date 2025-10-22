@@ -15,7 +15,6 @@ from system.config import *
 from core.static.utility import do_nothing
 
 class Layer(ABC):
-  training_only=False
   """
   Base class for all layers
   
@@ -31,11 +30,11 @@ class Layer(ABC):
     
   - 'calibrate' : method that will be called once per layer during compilation to generate a weight matrix as well as constant object attributes
     - Args:
-      - fan_in tuple[int, ...] : shape of the input to the layer
-      - fan_out_shape tuple[int, ...] : shape of the output of the layer
+      - fan_in tuple[int,...] : shape of the input to the layer
+      - fan_out_shape tuple[int,...] : shape of the output of the layer
     - Returns:
       - dict : weight_matrix (including bias and parametric values) for the whole layer
-      - tuple[int, ...] : shape of the output of the layer
+      - tuple[int,...] : shape of the output of the layer
       
   - 'forward' : method that will be called everytime the layer is called
     - Args:
@@ -67,6 +66,8 @@ class Layer(ABC):
       - dict : updated params for the layer
       - dict : updated opt state
   """
+  training_only=False
+  
   @abstractmethod
   def __init__(self):
     """
@@ -81,15 +82,15 @@ class Layer(ABC):
     pass
   
   @abstractmethod
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in:tuple[int,...], fan_out_shape:int) -> tuple[dict, tuple[int,...]]:
     """
     - A 'calibrate' method that will be called once per layer during compilation to generate a weight matrix as well as constant object attributes
       - Args:
-        - fan_in tuple[int, ...] : shape of the input to the layer
-        - fan_out_shape tuple[int, ...] : shape of the output of the layer
+        - fan_in tuple[int,...] : shape of the input to the layer
+        - fan_out_shape tuple[int,...] : shape of the output of the layer
       - Returns:
         - dict : weight_matrix (including bias and parametric values) for the whole layer
-        - tuple[int, ...] : shape of the output of the layer
+        - tuple[int,...] : shape of the output of the layer
     """
     pass
   
@@ -144,7 +145,7 @@ class Dense(Layer):
     self.function = function
     self.initializer = initializer
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:int) -> tuple[dict, tuple[int,...]]:
     weights = self.initializer((fan_in_shape[0], self.neuron_amount), fan_in_shape[0], fan_out_shape[0])
     biases = jnp.zeros((self.neuron_amount,))
     paremetric_parameters = {
@@ -225,7 +226,7 @@ class Localunit(Layer):
     self.function = function
     self.initializer = initializer
 
-  def calibrate(self, fan_in:tuple[int, ...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in:tuple[int,...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int,...]]:
     
     # generating the slide pattern
     ans = []
@@ -306,7 +307,7 @@ class Localunit(Layer):
 
 class Convolution(Layer):
   training_only=False
-  def __init__(self, kernel:tuple[int, int], channels:int, function:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  def __init__(self, kernel:tuple[int,int], channels:int, function:Function, stride:tuple[int,int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Convolution
     ---------
@@ -315,9 +316,9 @@ class Convolution(Layer):
     ---------
     Args
     ---------
-    - kernel                 (tuple[int, int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
+    - kernel                 (tuple[int,int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
     - channels               (int)             : the number of channels to output
-    - stride                 (tuple[int, int]) : the 2D stride to apply to the kernel
+    - stride                 (tuple[int,int]) : the 2D stride to apply to the kernel
     - function               (Function)        : the activation function
     - (Optional) name        (str)             : the name of the layer
     - (Optional) initializer (Initializer)     : intializer for the weights, defaults to Default
@@ -334,7 +335,7 @@ class Convolution(Layer):
     self.input_shape = None
     self.output_shape = None
 
-  def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,int,int], fan_out_shape:int) -> tuple[dict, tuple[int,...]]:
     # fan_in_shape = (C_in, H, W)
     C_in, H, W = fan_in_shape
 
@@ -492,7 +493,7 @@ class Convolution(Layer):
 
 class Deconvolution(Layer):
   training_only=False
-  def __init__(self, kernel:tuple[int, int], channels:int, function:Function, stride:tuple[int, int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
+  def __init__(self, kernel:tuple[int,int], channels:int, function:Function, stride:tuple[int,int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
     Deconvolution
     ---------
@@ -501,9 +502,9 @@ class Deconvolution(Layer):
     ---------
     Args
     ---------
-    - kernel                 (tuple[int, int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
+    - kernel                 (tuple[int,int]) : the kernel dimensions to apply, must be of the form (kernel_height, kernel_width)
     - channels               (int)             : the number of channels to output
-    - stride                 (tuple[int, int]) : the 2D stride to apply to the kernel
+    - stride                 (tuple[int,int]) : the 2D stride to apply to the kernel
     - function               (Function)        : the activation function
     - (Optional) name        (str)             : the name of the layer
     - (Optional) initializer (Initializer)     : intializer for the weights, defaults to Default
@@ -519,7 +520,7 @@ class Deconvolution(Layer):
     self.input_shape = None
     self.output_shape = None
 
-  def calibrate(self, fan_in_shape:tuple[int, int, int], fan_out_shape:int) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,int, int], fan_out_shape:int) -> tuple[dict, tuple[int,...]]:
     # fan_in_shape = (C_in, H, W)
     C_in, H, W = fan_in_shape
     
@@ -683,7 +684,7 @@ class Recurrent(Layer):
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,int]]:
     features, sequence_length = fan_in_shape
     
     if self.input_sequence is None:
@@ -868,7 +869,7 @@ class LSTM(Layer):
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,...]]:
 
     sequence_length, features = fan_in_shape
 
@@ -1186,7 +1187,7 @@ class GRU(Layer):
     self.input_sequence = input_sequence
     self.output_sequence = output_sequence
 
-  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,...]]:
     sequence_length, features = fan_in_shape
 
     if self.input_sequence is None:
@@ -1657,7 +1658,7 @@ class Attention(Layer):
 
 class MaxPooling(Layer):
   training_only=False
-  def __init__(self, pool_size:tuple[int, int], strides:tuple[int, int], name:str="", *args, **kwargs):
+  def __init__(self, pool_size:tuple[int,int], strides:tuple[int,int], name:str="", *args, **kwargs):
     """
     Max Pooling
     -----
@@ -1674,7 +1675,7 @@ class MaxPooling(Layer):
     self.strides = strides
     self.name = name
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,...]]:
     C, H, W = fan_in_shape
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
@@ -1724,7 +1725,7 @@ class MaxPooling(Layer):
 
 class MeanPooling(Layer):
   training_only=False
-  def __init__(self, pool_size:tuple[int, int] = (2, 2), strides:tuple[int, int] = (2, 2), name:str="", *args, **kwargs):
+  def __init__(self, pool_size:tuple[int,int]=(2,2), strides:tuple[int,int]=(2,2), name:str="", *args, **kwargs):
     """
     Mean Pooling
     -----
@@ -1741,7 +1742,7 @@ class MeanPooling(Layer):
     self.strides = strides
     self.name = name
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, int]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,int]) -> tuple[dict, tuple[int,...]]:
     C, H, W = fan_in_shape
     pooled_H = (H - self.pool_size[0]) // self.strides[0] + 1
     pooled_W = (W - self.pool_size[1]) // self.strides[1] + 1
@@ -1799,7 +1800,7 @@ class Flatten(Layer):
     
     self.name = name
 
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:int) -> tuple[dict, int]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:int) -> tuple[dict, int]:
     flattened_size = jnp.prod(jnp.array(fan_in_shape))
     self.input_shape = fan_in_shape
     
@@ -1827,7 +1828,7 @@ class Operation(Layer):
     self.function = function
     self.name = name
   
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int,...]]:
     
     # idk if there should be basic checking in the standard layer or if that is the API's spesific responsibility
     
@@ -1869,7 +1870,7 @@ class Dropout(Layer):
     self.rate = rate
     self.name = name
   
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int,...]]:
     return {}, fan_in_shape
   
   def forward(self, params:dict, inputs:jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -1896,7 +1897,7 @@ class Dropout(Layer):
 
 class Reshape(Layer):
   training_only=False
-  def __init__(self, target_shape:tuple[int, ...], name:str="", *args, **kwargs):
+  def __init__(self, target_shape:tuple[int,...], name:str="", *args, **kwargs):
     """
     Reshape
     -----
@@ -1904,13 +1905,13 @@ class Reshape(Layer):
     -----
     Args
     -----
-    - target_shape (tuple[int, ...]) : the target shape to reshape to
+    - target_shape (tuple[int,...]) : the target shape to reshape to
     - (Optional) name (string) : the name of the layer
     """
     self.target_shape = target_shape
     self.name = name
   
-  def calibrate(self, fan_in_shape:tuple[int, ...], fan_out_shape:tuple[int, ...]) -> tuple[dict, tuple[int, ...]]:
+  def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:tuple[int,...]) -> tuple[dict, tuple[int,...]]:
     input_size = jnp.prod(jnp.array(fan_in_shape[1:]))  # exclude batch dimension
     target_size = jnp.prod(jnp.array(self.target_shape))
     

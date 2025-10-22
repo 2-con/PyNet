@@ -1,14 +1,16 @@
-# aufy_project/setup.py
 from setuptools import setup, find_packages
 
 setup(
-  name='pynet',
-  version='1.0.0',
+  name="pynet",
+  version="1.0.0",
   packages=find_packages(),
-  install_requires=['numpy', 'math', 'random', 'itertools', 'time', 'matplotlib'],
+  install_requires=["numpy", "math", "random", 
+                    "itertools", "time", "matplotlib", "jaxlib", "jax", "typing", "abc"
+                    "sys", "os"],
 
-  author='Aufy Mulyadi',
-  author_email='72212@jisedu.or.id',
-  description='PyNet is a neural network framework and API library for Python.',
-  license='Apache License 2.0',
+  author="Aufy Mulyadi",
+  author_email="72212@jisedu.or.id",
+  description="PyNet is a neural network framework and API library for Python.",
+  long_description="PyNet is a neural network framework and API library for Python. It provides both a simple and a more advanced API for building, running and testing neural networks. Pynet also contains extra models and a suite of tools for data manipulation, mathematical operations, and visualization. PyNet is client-based so modified code only affects the local file and nothing else, making it suitable for experimentation and tinkering.",
+  license="Apache License 2.0",
 )
