@@ -69,7 +69,7 @@ class Ablate(Procedure):
     Standardnet:recompile
     Staticnet:ok
     """
-    self.model = model
+    self.model = model 
     self.model_layers = model.layers # immutable
     self.indecises = targer_layer_indecies
     self.args = args

@@ -29,6 +29,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import jax
 import jax.numpy as jnp
+import random
 
 from tools.utility import progress_bar
 from core.standard import metrics, optimizers, losses, initializers, functions, callbacks, datahandler
@@ -60,9 +61,8 @@ class Sequential:
     ======
       Sequential model where layers are processed sequentially.
 
-      Must contain Standard or Standard-inherited layers to be added to the model.
-      High-level arguments passed into the layers in the form of strings are to be extracted from the layer's parameters
-      and passed as arguments/keyword arguments using the .add() method to compile down to instances if it exists in PyNet.
+      Must contain Standard or Standard-inherited layers to be added to the model. High-level string arguments will not be 
+      translated into their respective instances, for that use the .add() method.
     """
     self.layers = list(args) if args is not None else []
 
@@ -74,22 +74,20 @@ class Sequential:
     """
     Add
     -----
-      Adds a specified layer to the network.
+      Translates string arguments into their respective instances and adds the layer to the model.
     -----
     Args
     -----
     - layer (StandardNet Instance) : the layer to add to the model **without** parameters
-    - *args (any)                : positional parameters to be passed to the layer, keep non-class inputs are to be passed as their original type
-    # - **kwargs (any)             : other keyword parameters to be passed to the layer
     -----
     Examples
     -----
       >>> 
-      model = Sequential(
-        Dense(64, ReLU()),
-        Dense(32, ReLU()),
-        Dense(16, ReLU()),
-      )
+    model = Sequential(
+      Dense(64, ReLU()),
+      Dense(32, ReLU()),
+      Dense(16, ReLU()),
+    )
           
       Can be written as
       
@@ -162,7 +160,7 @@ class Sequential:
     
     self.layers.append(layer)
 
-  def compile(self, input_shape:tuple[int, ...], optimizer:optimizers.Optimizer, loss:losses.Loss, learning_rate:float, epochs:int, metrics:tuple[metrics.Metric,...]=[], validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, optimizer_hyperparameters:dict={}, *args, **kwargs):
+  def compile(self, input_shape:tuple[int,...], optimizer:optimizers.Optimizer, loss:losses.Loss, learning_rate:float, epochs:int, metrics:tuple[metrics.Metric,...]=[], validation_split:float=0, batch_size:int=1, verbose:int=1, logging:int=1, optimizer_hyperparameters:dict={}, *args, **kwargs):
     """
     Compile
     -----
@@ -176,13 +174,16 @@ class Sequential:
     - optimizer                   (core.standard.optimizers.Optimizer) : optimizer to use, not an instance
     - learning_rate               (float)                              : learning rate to use
     - epochs                      (int)                                : number of epochs to train for
-    - (Optional) metrics          (list)                               : metrics to evaluate. can be a list of core.standard.metrics.Metric or a core.standard.losses.Loss instance
-    - (Optional) batch_size       (int)                                : batch size to use
-    - (Optional) verbose          (int)                                : verbosity level
-    - (Optional) logging          (int)                                : how ofter to report if the verbosity is at least 3
-    - (Optional) callbacks        (core.standard.callback)             : call a custom callback class during training with access to all local variables, read more in the documentation.
-    - (Optional) validation_split (float)                              : fraction of the data to use for validation, must be between [0, 1). Default is 0 (no validation).
+    
+    - (Optional) metrics           (list)                               : metrics to evaluate. can be a list of core.standard.metrics.Metric or a core.standard.losses.Loss instance
+    - (Optional) batch_size        (int)                                : batch size to use
+    - (Optional) verbose           (int)                                : verbosity level
+    - (Optional) logging           (int)                                : how ofter to report if the verbosity is at least 3
+    - (Optional) callbacks         (core.standard.callback)             : call a custom callback class during training with access to all local variables, read more in the documentation.
+    - (Optional) validation_split  (float)                              : fraction of the data to use for validation, must be between [0, 1). Default is 0 (no validation).
+    
     - (Optional) regularization   (tuple[str, float])                  : type of regularization to use, position 0 is the type ("L1" or "L2"), position 1 is the lambda value. Default is None (no regularization).
+    - (Optional) universal_seed   (int)                                : seed to use for all random operations, default is None (randomly generated).
     
     Verbosity Levels
     -----
@@ -205,6 +206,7 @@ class Sequential:
     self.validation_split = validation_split
     self.metrics = tuple([m for m in metrics])
     self.regularization = kwargs.get('regularization', ["None", 1])
+    self.universal_seed = kwargs.get('universal_seed', None)
     
     self.error_logs = []
     self.validation_error_logs = []
@@ -241,6 +243,8 @@ class Sequential:
     
     # set sizes while ignoring fans
     for layer_index, layer in enumerate(self.layers):
+      layer.universal_seed = random.randint(0, 2**32) if self.universal_seed is None else self.universal_seed
+      
       if layer_index == 0:
         _, layer_size = layer.calibrate(fan_in_shape=input_shape, fan_out_shape=(1,))
       else:

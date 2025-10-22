@@ -66,6 +66,7 @@ class Layer(ABC):
       - dict : updated params for the layer
       - dict : updated opt state
   """
+  layer_seed = 0
   training_only=False
   
   @abstractmethod
@@ -123,6 +124,7 @@ class Layer(ABC):
     pass
 
 class Dense(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, neurons:int, function:Function, name:str="", initializer:Initializer=Default(), *args, **kwargs):
     """
@@ -146,10 +148,10 @@ class Dense(Layer):
     self.initializer = initializer
 
   def calibrate(self, fan_in_shape:tuple[int,...], fan_out_shape:int) -> tuple[dict, tuple[int,...]]:
-    weights = self.initializer((fan_in_shape[0], self.neuron_amount), fan_in_shape[0], fan_out_shape[0])
+    weights = self.initializer(self.layer_seed, (fan_in_shape[0], self.neuron_amount), fan_in_shape[0], fan_out_shape[0])
     biases = jnp.zeros((self.neuron_amount,))
     paremetric_parameters = {
-      paramater_name: self.initializer((self.neuron_amount,), fan_in_shape[0], fan_out_shape[0]) for paramater_name in self.function.parameters
+      paramater_name: self.initializer(self.layer_seed, (self.neuron_amount,), fan_in_shape[0], fan_out_shape[0]) for paramater_name in self.function.parameters
     }
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.neuron_amount,)
@@ -204,6 +206,7 @@ class Dense(Layer):
     return updated_params, new_opt_state
 
 class Localunit(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, receptive_field:int, function:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -249,10 +252,10 @@ class Localunit(Layer):
     self.mask = jnp.array(ans).T
     
     self.input_size = fan_in[0]
-    weights = self.initializer((self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape[0])
+    weights = self.initializer(self.layer_seed, (self.mask.shape[0], self.mask.shape[1]), fan_in[0], fan_out_shape[0])
     biases = jnp.zeros((self.mask.shape[1],))
     paremetric_parameters = {
-      paramater_name: self.initializer((self.mask.shape[0],), fan_in[0], fan_out_shape[0]) for paramater_name in self.function.parameters
+      paramater_name: self.initializer(self.layer_seed, (self.mask.shape[0],), fan_in[0], fan_out_shape[0]) for paramater_name in self.function.parameters
     }
     
     return {'weights': weights, 'biases': biases, **paremetric_parameters}, (self.mask.shape[0],)
@@ -306,6 +309,7 @@ class Localunit(Layer):
     return updated_params, new_opt_state
 
 class Convolution(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, kernel:tuple[int,int], channels:int, function:Function, stride:tuple[int,int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -351,7 +355,7 @@ class Convolution(Layer):
     out_W = (W - self.kernel[1]) // self.stride[1] + 1
 
     parametrics = {
-      paramater_name: self.initializer((self.channels,), C_in * self.kernel[0] * self.kernel[1], fan_out_shape) for paramater_name in self.function.parameters
+      paramater_name: self.initializer(self.layer_seed, (self.channels,), C_in * self.kernel[0] * self.kernel[1], fan_out_shape) for paramater_name in self.function.parameters
     }
     
     return {"weights": weights, "biases": biases, **parametrics}, (self.channels, out_H, out_W)
@@ -492,6 +496,7 @@ class Convolution(Layer):
     return updated_params, new_opt_state
 
 class Deconvolution(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, kernel:tuple[int,int], channels:int, function:Function, stride:tuple[int,int], initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -539,7 +544,7 @@ class Deconvolution(Layer):
     params["biases"] = jnp.zeros((self.channels, out_H, out_W))
     
     parametrics = {
-      name: self.initializer((self.channels,), C_in * kH * kW, fan_out_shape) for name in self.function.parameters
+      name: self.initializer(self.layer_seed, (self.channels,), C_in * kH * kW, fan_out_shape) for name in self.function.parameters
     }
     return {**params, **parametrics} , (self.channels, out_H, out_W)
 
@@ -660,6 +665,7 @@ class Deconvolution(Layer):
     return updated_params, new_opt_state
 
 class Recurrent(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -695,13 +701,13 @@ class Recurrent(Layer):
     params = {}
     for cell_index in range(self.cells):
       parametrics ={
-        name: self.initializer((features,), features, fan_out_shape[0]) for name in self.function.parameters
+        name: self.initializer(self.layer_seed, (features,), features, fan_out_shape[0]) for name in self.function.parameters
       }
       
       params[f'cell_{cell_index}'] = {
-        'input_weights': self.initializer((sequence_length,), features, fan_out_shape[0]),
-        'carry_weights': self.initializer((sequence_length,), features, fan_out_shape[0]),
-        'final_weights': self.initializer((sequence_length * 2, sequence_length), features, fan_out_shape[0]),
+        'input_weights': self.initializer(self.layer_seed, (sequence_length,), features, fan_out_shape[0]),
+        'carry_weights': self.initializer(self.layer_seed, (sequence_length,), features, fan_out_shape[0]),
+        'final_weights': self.initializer(self.layer_seed, (sequence_length * 2, sequence_length), features, fan_out_shape[0]),
         'final_bias': jnp.zeros(sequence_length * 2),
         **parametrics
       }
@@ -845,6 +851,7 @@ class Recurrent(Layer):
     return updated_params, new_opt_state
 
 class LSTM(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -886,27 +893,27 @@ class LSTM(Layer):
     params = {}
     for cell_index in range(self.cells):
       parametrics = {
-        name: self.initializer((features,), concat_size, features) for name in self.function.parameters
+        name: self.initializer(self.layer_seed, (features,), concat_size, features) for name in self.function.parameters
       }
       
       params[f'cell_{cell_index}'] = {
         # elementwise multipliers (preserve length)
-        'input_weights': self.initializer((features,), features, features),
-        'carry_weights': self.initializer((features,), features, features),
+        'input_weights': self.initializer(self.layer_seed, (features,), features, features),
+        'carry_weights': self.initializer(self.layer_seed, (features,), features, features),
 
-        'forget_weights': self.initializer((concat_size, features), concat_size, features),
+        'forget_weights': self.initializer(self.layer_seed, (concat_size, features), concat_size, features),
         'forget_bias': jnp.zeros((features,)),
 
-        'input_gate_weights': self.initializer((concat_size, features), concat_size, features),
+        'input_gate_weights': self.initializer(self.layer_seed, (concat_size, features), concat_size, features),
         'input_gate_bias': jnp.zeros((features,)),
 
-        'output_gate_weights': self.initializer((concat_size, features), concat_size, features),
+        'output_gate_weights': self.initializer(self.layer_seed, (concat_size, features), concat_size, features),
         'output_gate_bias': jnp.zeros((features,)),
 
-        'candidate_weights': self.initializer((concat_size, features), concat_size, features),
+        'candidate_weights': self.initializer(self.layer_seed, (concat_size, features), concat_size, features),
         'candidate_bias': jnp.zeros((features,)),
 
-        'final_weights': self.initializer((concat_size, features), concat_size, features),
+        'final_weights': self.initializer(self.layer_seed, (concat_size, features), concat_size, features),
         'final_bias': jnp.zeros((concat_size,)),
         
         **parametrics
@@ -1163,6 +1170,7 @@ class LSTM(Layer):
     return updated_params, new_opt_state
 
 class GRU(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, cells:int, function:Function, input_sequence:tuple[int,...]=None, output_sequence:tuple[int,...]=None, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -1199,26 +1207,26 @@ class GRU(Layer):
     for cell_index in range(self.cells):
       parametrics = {}
       for name in self.function.parameters:
-        parametrics[name] = self.initializer((features,), features, features)
+        parametrics[name] = self.initializer(self.layer_seed, (features,), features, features)
 
       params[f'cell_{cell_index}'] = {
         # reset gate weights: x @ W_r  and h_prev @ U_r
-        "W_r": self.initializer((features, features), features, features),
-        "U_r": self.initializer((features, features), features, features),
+        "W_r": self.initializer(self.layer_seed, (features, features), features, features),
+        "U_r": self.initializer(self.layer_seed, (features, features), features, features),
         "b_r": jnp.zeros((features,)),
 
         # update gate
-        "W_z": self.initializer((features, features), features, features),
-        "U_z": self.initializer((features, features), features, features),
+        "W_z": self.initializer(self.layer_seed, (features, features), features, features),
+        "U_z": self.initializer(self.layer_seed, (features, features), features, features),
         "b_z": jnp.zeros((features,)),
 
         # candidate hidden
-        "W_h": self.initializer((features, features), features, features),
-        "U_h": self.initializer((features, features), features, features),
+        "W_h": self.initializer(self.layer_seed, (features, features), features, features),
+        "U_h": self.initializer(self.layer_seed, (features, features), features, features),
         "b_h": jnp.zeros((features,)),
 
         # final fully-connected layer before output (concat(h, x) -> features)
-        "final_weights": self.initializer((features * 2, features), features, features),
+        "final_weights": self.initializer(self.layer_seed, (features * 2, features), features, features),
         "final_bias": jnp.zeros((features,)),
 
         **parametrics
@@ -1451,6 +1459,7 @@ class GRU(Layer):
     return updated_params, new_opt_state
 
 class Attention(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, heads:int, function:Function, initializer:Initializer=Default(), name:str="", *args, **kwargs):
     """
@@ -1482,9 +1491,9 @@ class Attention(Layer):
     # each head has its own Q, K, V
     for head in range(self.heads):
       params[f'head_{head}'] = {
-        "W_Q": self.initializer((sequence_length, sequence_length), features, fan_out_shape[0]),
-        "W_K": self.initializer((sequence_length, sequence_length), features, fan_out_shape[0]),
-        "W_V": self.initializer((sequence_length, sequence_length), features, fan_out_shape[0]),
+        "W_Q": self.initializer(self.layer_seed, (sequence_length, sequence_length), features, fan_out_shape[0]),
+        "W_K": self.initializer(self.layer_seed, (sequence_length, sequence_length), features, fan_out_shape[0]),
+        "W_V": self.initializer(self.layer_seed, (sequence_length, sequence_length), features, fan_out_shape[0]),
         "b_Q": jnp.zeros(sequence_length),
         "b_K": jnp.zeros(sequence_length),
         "b_V": jnp.zeros(sequence_length),
@@ -1492,12 +1501,12 @@ class Attention(Layer):
 
     # final projection after concat
     params["final"] = {
-      "W_O": self.initializer((sequence_length * self.heads, sequence_length), features, fan_out_shape[0]),
+      "W_O": self.initializer(self.layer_seed, (sequence_length * self.heads, sequence_length), features, fan_out_shape[0]),
       "b_O": jnp.zeros(sequence_length)
     }
     
     parametrics = {
-      parameter_name: self.initializer((sequence_length,), features, fan_out_shape[0]) for parameter_name in self.function.parameters
+      parameter_name: self.initializer(self.layer_seed, (sequence_length,), features, fan_out_shape[0]) for parameter_name in self.function.parameters
     }
     
     return {**params, **parametrics}, (features, sequence_length)
@@ -1657,6 +1666,7 @@ class Attention(Layer):
 # functional layers
 
 class MaxPooling(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, pool_size:tuple[int,int], strides:tuple[int,int], name:str="", *args, **kwargs):
     """
@@ -1724,6 +1734,7 @@ class MaxPooling(Layer):
     return upstream_gradient, {}
 
 class MeanPooling(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, pool_size:tuple[int,int]=(2,2), strides:tuple[int,int]=(2,2), name:str="", *args, **kwargs):
     """
@@ -1786,6 +1797,7 @@ class MeanPooling(Layer):
     return upstream_gradient, {}
 
 class Flatten(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, name:str="", *args, **kwargs):
     """
@@ -1817,6 +1829,7 @@ class Flatten(Layer):
     return upstream_gradient, {}
 
 class Operation(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, function:Function, name:str="", *args, **kwargs):
     """
@@ -1847,6 +1860,7 @@ class Operation(Layer):
     return self.function.backward(error, weighted_sums), {}
 
 class Dropout(Layer):
+  layer_seed = 0
   training_only=True
   def __init__(self, rate:float, mode:str, name:str="", *args, **kwargs):
     """
@@ -1896,6 +1910,7 @@ class Dropout(Layer):
     return error * weighted_sums / (1.0 - self.rate), {}
 
 class Reshape(Layer):
+  layer_seed = 0
   training_only=False
   def __init__(self, target_shape:tuple[int,...], name:str="", *args, **kwargs):
     """
