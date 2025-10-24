@@ -12,9 +12,9 @@
 ---
 
 ### What is PyNet ❓
-PyNet is a free and open-source software framework for machine learning and artificial intelligence. Unlike professional-grade libraries, PyNet focuses on small-scale educational projects and experiments by providing multiple APIs and spaces for testing, experimenting, and debugging model architectures. PyNet also allows full access to the source code, lowering the barrier to entry for enthusiasts.
+PyNet is a free and open-source software framework for machine learning and artificial intelligence. Unlike professional-grade libraries, PyNet focuses on small-scale educational projects and curiosity. Everything in PyNet, even the calculation logic, is written in pure python therefore there will be a lot of overhead that can slow down code.
 
-PyNet features distinct APIs and a suite of tools that cater to different needs that allows users to explore core ML concepts from the ground up in multiple programming paradigms. Users can directly modify and test new ideas by injecting code directly into the framework itself to allow for greater control, PyNet is client-based so modified code only affects the local file and nothing else.
+PyNet features a main API and a suite of tools that to assist in model building. However, it is reccomended to use PyNet's successor JXNet which is the direct continuation of this repository.
 
 PyNet is committed to democratizing and opening up machine learning and artificial intelligence to the world, so from the newest student to the most experienced scientist, we are determined to share a new technological revolution that is on the horizon.
 
@@ -89,33 +89,7 @@ At its core, PyNet is a framework full of layers and processes that require comp
 
 ### Active PyNet APIs
 ---
-#### NetFlash API
-A high-performance API built around the JAX ecosystem, leveraging JNP operations and JIT-compiled systems to boost calculations up to 5x the speed thanks to the XLA compiler. Everything is designed to be modular, so a custom layer can be passed into the sequential class as long as it adheres to NetFlash specifications.
-
-**Learnable layers:**
-- Multiheaded Self-Attention
-- Fully Connected
-- Locally Connected
-- Multichannel Convolution
-- Multichannel Deconvolution
-- Long Short-Term Memory (LSTM)
-- Gated Recurrent Unit (GRU)
-- Simple Recurrent (Recurrent)
-
-**Functional layers:**
-- Operation (Multipurpose)
-- Multichannel MaxPooling
-- Multichannel MeanPooling
-- Flatten
-- Dropout
-- Reshape
-
----
-#### NetLab API
-An experiment-oriented API using JNP and the JAX ecosystem, unlike NetFlash, NetLab aims to provide an easier way to experiment and configure tests by providing additional features and scaling back some features. NetLab encourage the use of custom implimentations as long as it follows strict guidelines on how to design such implimentations.
-
----
-#### NetCore API
+#### StaticNet API
 The main and first API built for the PyNet framework, everything is built entirely on python with object-oriented programming as the main programming paradigm for each layer. But because everything is entirely built on Python, training can be quite slow depending on the machine and therefore, is not advised to serve as a general-purpose library; Other, more professionally developed libraries may suit the task at hand.
 
 **Learnable layers:**
@@ -136,7 +110,7 @@ The main and first API built for the PyNet framework, everything is built entire
 - Reshape
 
 ---
-#### PyNet Alpha
+#### LiteNet
 The predecessor to PyNet's main APIs. This module contains basic functions for propagation, backpropagation, and updating a neural network. It's a great starting point for understanding the core mechanics before diving into the main APIs. Advanced features such as optimizers and parametric functions are not available for this implementation by default.
 
 **Provided Methods:**
@@ -147,7 +121,6 @@ The predecessor to PyNet's main APIs. This module contains basic functions for p
 - Complimentary Training Method
 
 For a more detailed description on specific APIs or layers, refer to the documentation
-
 ---
 
 ### Additional Features ⚒️
@@ -180,8 +153,6 @@ PyNet's regression models provide a diverse set of tools for predicting continuo
 - Exponential Regression
 - Power Regression
 - Logarithmic Regression
-- Sinusoidal Regression (external model, does not use the PyNet framework)
-
 ---
 ### Classifiers
 
@@ -192,16 +163,6 @@ The classification suite offers a range of models for predicting discrete catego
 - Random Forest
 - Naive Bayes
 - SVM
-
----
-### Datasets
-
-PyNet includes a variety of built-in datasets to get you started quickly. These datasets are pre-packaged and ready for use with the framework's models, removing the need for manual data acquisition and preprocessing.
-
-- Cluster (classification)
-- Image (variations of the MNIST dataset as a python list)
-- Regression
-- Text
 
 ---
 ### Extra Tools
@@ -217,11 +178,6 @@ The extra tools are a collection of utility modules designed to simplify common 
 
 ---
 
-### Documentation 📚
-TEXT
-
----
-
 ### Installation 📲
 Despite self-sufficiency as a core philosophy, PyNet still needs some modules for core operations and processing.
 <br>
@@ -231,12 +187,9 @@ Despite self-sufficiency as a core philosophy, PyNet still needs some modules fo
 
 - NumPy
 - Math
-- Random
-- Itertools
 - Time
 - Matplotlib
 - Typing
-- JAX
 
 ---
 
