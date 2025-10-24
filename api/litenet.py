@@ -194,14 +194,12 @@ def train(network, features, targets, learning_rate: float, epochs: int, **kwarg
   -----
   Source Code
   -----
-  
+  >>>
   for epoch in range(epochs):
     for feature, target in zip(features, targets):
       activations, weighted_sums = propagate(network, feature, ReLU)
       error = backpropegate(network, activations, weighted_sums, target, ReLU_derivative)
-      
       update(network, activations, error, learning_rate)
-
     if epoch % 10 == 0:
       print(f"Epoch {epoch:5} | Error {mse(target, activations[-1])}")
   """

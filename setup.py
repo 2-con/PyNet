@@ -5,8 +5,7 @@ setup(
   version="1.0.0",
   packages=find_packages(),
   install_requires=["numpy", "math", "random", 
-                    "itertools", "time", "matplotlib", "jaxlib", "jax", "typing", "abc"
-                    "sys", "os"],
+                    "matplotlib", "jaxlib", "jax"],
 
   author="Aufy Mulyadi",
   author_email="72212@jisedu.or.id",

@@ -1,5 +1,5 @@
 from . import classifier
 from . import cluster
-from . import regression
+from . import regressor
 
-__all__ = ['regression', 'classifier', 'cluster']
+__all__ = ['regressor', 'classifier', 'cluster']

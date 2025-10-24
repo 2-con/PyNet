@@ -19,6 +19,7 @@ if __name__ == "__main__":
         """)
   exit()
 
+
 #######################################################################################################
 #                                               Imports                                               #
 #######################################################################################################
@@ -32,7 +33,7 @@ class Sample:
     """
     Sample
     -----
-      Defines a sample set of compiled models to be benchmarked listed in order of evaluation.
+      Defines a sample set of models to be benchmarked listed in order of evaluation.
     """
     self.models = args
     
@@ -46,6 +47,9 @@ class Sample:
       passed should not leak state between cycles, even if its for the same model.
     """
     self.procedures = args
+    
+    if any([not isinstance(procedure, Procedure) for procedure in self.procedures]):
+      raise ValueError("All procedures must be of type Procedure or inherit from it. It can be found in core > lab > procedures.py")
     
   def compile(self, cycles:int, verbose:int=0, logging:int=1, name:str="Experiment", *args, **kwargs):
     """
@@ -91,15 +95,29 @@ class Sample:
     -----
     - dataset (dict) : the labeled dataset to run the experiment on
     """
+    # data > model > cycle > procedures
+    all_logs = {}
     
     # cydle through the datasets
-    ...
-    
-    """
-    
-    d = {
-      [feature, target]
-    }
-    
-    """
+    for dataset_name, data in dataset.items():
+      all_logs[dataset_name] = {}
+      
+      # cydle through the models
+      for index, model in enumerate(self.models):
+        all_logs[dataset_name][f"Model {index+1}"] = {}
+        
+        # cydle through the cycle
+        for cycle in range(self.cycles):
+          all_logs[dataset_name][f"Model {index+1}"][f"Cycle {cycle+1}"] = []
+          
+          # cydle through the procedures
+          for procedure in self.procedures:
+            
+            # run the procedure and log results
+            all_logs[dataset_name][f"Model {index+1}"][f"Cycle {cycle+1}"][f"Procedure {procedure.__name__}"] = procedure(
+              model, data, self.verbose, self.logging, self.name, cycle, dataset_name, index
+            )
 
+    
+    
+    self.logs = all_logs

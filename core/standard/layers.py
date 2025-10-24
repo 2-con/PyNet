@@ -5,14 +5,12 @@ from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
 import random
-import functools
 
 # for type checking
 from core.standard.functions import Function
 from core.standard.initializers import Initializer, Default
 
 from system.config import *
-from core.static.utility import do_nothing
 
 class Layer(ABC):
   """
