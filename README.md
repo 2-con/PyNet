@@ -165,18 +165,6 @@ The classification suite offers a range of models for predicting discrete catego
 - SVM
 
 ---
-### Extra Tools
-
-The extra tools are a collection of utility modules designed to simplify common machine learning tasks. They provide functionalities for data manipulation, mathematical operations, and visualization, streamlining your workflow.
-
-- Arraytools
-- Logic
-- Math
-- Scaler
-- Utility
-- Visual
-
----
 
 ### Installation 📲
 Despite self-sufficiency as a core philosophy, PyNet still needs some modules for core operations and processing.
@@ -201,7 +189,7 @@ This project is licensed under the Apache License 2.0 (January 2004) for distrib
 ---
 
 ### Contributors 🤝
-PyNet is a project that started in January 2024 and has been receiving updates ever since from one person, any help is much appreciated.
+PyNet is a project that started in January 2025 and has been receiving updates ever since from one person, any help is much appreciated.
 
 **Maintainer**
 2-Con
